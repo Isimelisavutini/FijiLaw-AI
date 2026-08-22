@@ -18,7 +18,7 @@ export default function Home() {
   async function submit(e: FormEvent) {
     e.preventDefault(); setLoading(true); setError(''); setResult(null);
     try {
-      const base = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:5000';
+      const base = process.env.NEXT_PUBLIC_API_URL ?? 'https://fijilaw-api-production-production.up.railway.app';
       const response = await fetch(`${base}/api/legal/triage`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ situation, language: 'en' })
