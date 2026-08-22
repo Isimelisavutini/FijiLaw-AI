@@ -1,0 +1,11 @@
+{
+  "name": "fijilaw-ai",
+  "private": true,
+  "workspaces": ["src/FijiLaw.Web"],
+  "scripts": {
+    "web:dev": "npm run dev --workspace fijilaw-web",
+    "web:typecheck": "npm run typecheck --workspace fijilaw-web",
+    "web:build": "npm run build --workspace fijilaw-web",
+    "build": "npm run web:typecheck && npm run web:build"
+  }
+}
