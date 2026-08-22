@@ -11,6 +11,7 @@ type Result = {
 
 type DocumentResult = { fileName: string; contentType?: string; characterCount: number; preview: string; assessment: Result; note: string; };
 type LegalService = { id:string; name:string; type:string; city:string; address:string; phone?:string; website?:string; practiceAreas:string[]; verified:boolean; verificationNote:string; };
+type ApiStatus = 'checking' | 'online' | 'offline';
 
 const legalAreas = [
   ['Employment', 'Dismissal, wages, workplace rights'], ['Consumer Rights', 'Refunds, faulty goods, misleading conduct'],
@@ -21,57 +22,114 @@ const legalAreas = [
 const entryPaths = [
   ['Tell Me My Rights', 'Describe a situation and receive an initial legal assessment.', 'Start assessment', '#triage'],
   ['Upload a Legal Document', 'Understand a letter, contract, notice or other legal document.', 'Analyse document', '#document-upload'],
-  ['Find a Lawyer', 'Search for an appropriate legal practitioner by area of law and location.', 'Search directory', '#legal-directory'],
+  ['Find a Lawyer', 'Search for a legal practitioner by area of law and location.', 'Search directory', '#legal-directory'],
   ['Find Legal Aid', 'Identify public and community legal assistance options.', 'Find Legal Aid', '#legal-directory'],
   ['Nearest Legal Office', 'Find an appropriate legal office based on your town or city.', 'Find office', '#legal-directory'],
   ['Continue My Case', 'Return to a saved matter, evidence timeline and previous assessment.', 'Account required', '#services']
 ];
 
-function riskLabel(value: string | number) { if (typeof value === 'number') return value <= 0 ? 'Low' : value === 1 ? 'Medium' : 'High'; if (value === '0') return 'Low'; return value; }
+function riskLabel(value: string | number) {
+  if (typeof value === 'number') return value <= 0 ? 'Low' : value === 1 ? 'Medium' : 'High';
+  if (value === '0') return 'Low'; return value;
+}
+
+function friendlyApiError(status: ApiStatus) {
+  return status === 'offline'
+    ? 'FijiLaw AI is temporarily unable to reach the legal service. Your information has not been submitted. Please try again shortly.'
+    : 'FijiLaw AI could not complete this request. Please try again. If the problem continues, the legal service may be temporarily unavailable.';
+}
 
 function Assessment({ result, title = 'Initial assessment' }: { result: Result; title?: string }) {
-  return <section className="result"><div className="resultHead"><div><p className="eyebrow">{title.toUpperCase()}</p><h2>{result.issue}</h2></div><span className="risk">{riskLabel(result.riskLevel)} risk</span></div>{result.humanReviewRequired && <div className="warning"><strong>Human legal review recommended.</strong> This matter should not rely on AI alone.</div>}<h3>Guidance</h3><p>{result.guidance}</p><h3>Information still needed</h3><ul>{result.missingInformation.map(x => <li key={x}>{x}</li>)}</ul><h3>Next steps</h3><ol>{result.nextSteps.map(x => <li key={x}>{x}</li>)}</ol><h3>Verified authorities</h3>{result.authorities.length ? <ul className="authorityList">{result.authorities.map((a, i) => <li key={`${a.title}-${a.provision}-${i}`}><strong>{a.title}</strong>{a.provision ? ` — ${a.provision}` : ''}{a.sourceUrl ? <a href={a.sourceUrl} target="_blank" rel="noreferrer">View official source ↗</a> : null}</li>)}</ul> : <p>No verified legal authorities are connected yet. The system intentionally does not invent citations.</p>}<p className="disclaimer">{result.disclaimer}<br />Reference: {result.correlationId}</p></section>;
+  return <section className="result">
+    <div className="resultHead"><div><p className="eyebrow">{title.toUpperCase()}</p><h2>{result.issue}</h2></div><span className="risk">{riskLabel(result.riskLevel)} risk</span></div>
+    {result.humanReviewRequired && <div className="warning"><strong>Human legal review recommended.</strong> This matter should not rely on AI alone.</div>}
+    <h3>Guidance</h3><p>{result.guidance}</p>
+    <h3>Information still needed</h3><ul>{result.missingInformation.map(x => <li key={x}>{x}</li>)}</ul>
+    <h3>Next steps</h3><ol>{result.nextSteps.map(x => <li key={x}>{x}</li>)}</ol>
+    <h3>Verified authorities</h3>{result.authorities.length ? <ul className="authorityList">{result.authorities.map((a, i) => <li key={`${a.title}-${a.provision}-${i}`}><strong>{a.title}</strong>{a.provision ? ` — ${a.provision}` : ''}{a.sourceUrl ? <a href={a.sourceUrl} target="_blank" rel="noreferrer">View official source ↗</a> : null}</li>)}</ul> : <p>No verified legal authorities are connected yet. The system intentionally does not invent citations.</p>}
+    <p className="disclaimer">{result.disclaimer}<br />Reference: {result.correlationId}</p>
+  </section>;
 }
 
 export default function Home() {
   const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'https://fijilaw-api-production-production.up.railway.app';
+  const [apiStatus, setApiStatus] = useState<ApiStatus>('checking');
   const [situation, setSituation] = useState(''); const [result, setResult] = useState<Result | null>(null); const [loading, setLoading] = useState(false); const [error, setError] = useState('');
   const [documentFile, setDocumentFile] = useState<File | null>(null); const [documentResult, setDocumentResult] = useState<DocumentResult | null>(null); const [documentLoading, setDocumentLoading] = useState(false); const [documentError, setDocumentError] = useState('');
   const [services, setServices] = useState<LegalService[]>([]); const [cities, setCities] = useState<string[]>([]); const [directoryLoading, setDirectoryLoading] = useState(true); const [directoryError, setDirectoryError] = useState('');
   const [city, setCity] = useState(''); const [serviceType, setServiceType] = useState(''); const [area, setArea] = useState(''); const [directoryQuery, setDirectoryQuery] = useState('');
 
-  useEffect(() => {
-    let active = true;
-    fetch(`${apiBase}/api/legal-services`).then(r => r.ok ? r.json() : Promise.reject()).then(body => { if(active){ setServices(body.items ?? []); setCities(body.cities ?? []); } }).catch(() => active && setDirectoryError('The legal services directory is temporarily unavailable.')).finally(() => active && setDirectoryLoading(false));
-    return () => { active = false; };
-  }, [apiBase]);
+  async function checkApi() {
+    setApiStatus('checking');
+    try {
+      const response = await fetch(`${apiBase}/health`, { method: 'GET', cache: 'no-store' });
+      setApiStatus(response.ok ? 'online' : 'offline');
+    } catch { setApiStatus('offline'); }
+  }
+
+  async function loadDirectory() {
+    setDirectoryLoading(true); setDirectoryError('');
+    try {
+      const response = await fetch(`${apiBase}/api/legal-services`, { cache: 'no-store' });
+      if (!response.ok) throw new Error();
+      const body = await response.json(); setServices(body.items ?? []); setCities(body.cities ?? []);
+    } catch { setDirectoryError(friendlyApiError(apiStatus)); }
+    finally { setDirectoryLoading(false); }
+  }
+
+  useEffect(() => { checkApi(); }, [apiBase]);
+  useEffect(() => { if (apiStatus !== 'checking') loadDirectory(); }, [apiStatus]);
 
   const visibleServices = useMemo(() => services.filter(s => {
     const q = directoryQuery.trim().toLowerCase();
     return (!city || s.city === city) && (!serviceType || s.type.includes(serviceType)) && (!area || s.practiceAreas.some(x => x.toLowerCase().includes(area.toLowerCase())) || s.practiceAreas.includes('General')) && (!q || `${s.name} ${s.address} ${s.city} ${s.practiceAreas.join(' ')}`.toLowerCase().includes(q));
   }), [services, city, serviceType, area, directoryQuery]);
 
-  async function submit(e: FormEvent) { e.preventDefault(); setLoading(true); setError(''); setResult(null); try { const response = await fetch(`${apiBase}/api/legal/triage`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ situation, language:'en' }) }); if(!response.ok) throw new Error('The legal triage service could not process this request.'); setResult(await response.json()); } catch(e){ setError(e instanceof Error ? e.message : 'Unexpected error'); } finally { setLoading(false); } }
+  async function submit(e: FormEvent) {
+    e.preventDefault(); setLoading(true); setError(''); setResult(null);
+    try {
+      const response = await fetch(`${apiBase}/api/legal/triage`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ situation, language:'en' }) });
+      if (!response.ok) throw new Error(); setResult(await response.json()); setApiStatus('online');
+    } catch { setError(friendlyApiError(apiStatus)); setApiStatus('offline'); }
+    finally { setLoading(false); }
+  }
+
   function chooseDocument(e: ChangeEvent<HTMLInputElement>) { setDocumentError(''); setDocumentResult(null); setDocumentFile(e.target.files?.[0] ?? null); }
-  async function analyseDocument(e: FormEvent) { e.preventDefault(); if(!documentFile) return; setDocumentLoading(true); setDocumentError(''); setDocumentResult(null); try { const form = new FormData(); form.append('file', documentFile); const response = await fetch(`${apiBase}/api/legal/documents/analyse`, { method:'POST', body:form }); const body = await response.json(); if(!response.ok) throw new Error(body.error ?? body.detail ?? 'The document could not be analysed.'); setDocumentResult(body); } catch(e){ setDocumentError(e instanceof Error ? e.message : 'Unexpected error'); } finally { setDocumentLoading(false); } }
+
+  async function analyseDocument(e: FormEvent) {
+    e.preventDefault(); if (!documentFile) return;
+    setDocumentLoading(true); setDocumentError(''); setDocumentResult(null);
+    try {
+      const form = new FormData(); form.append('file', documentFile);
+      const response = await fetch(`${apiBase}/api/legal/documents/analyse`, { method:'POST', body:form });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? body.detail ?? 'The document could not be analysed.');
+      setDocumentResult(body); setApiStatus('online');
+    } catch (e) {
+      setDocumentError(e instanceof Error && e.message !== 'Failed to fetch' ? e.message : friendlyApiError(apiStatus));
+      setApiStatus('offline');
+    } finally { setDocumentLoading(false); }
+  }
 
   return <main className="siteShell">
-    <header className="siteHeader"><a className="brand" href="#top">FijiLaw AI</a><nav className="navLinks"><a href="#services">Get help</a><a href="#legal-directory">Find legal help</a><a href="#legal-help">Legal areas</a><a href="#trust">Trust & safety</a></nav><a className="headerCta" href="#triage">Start assessment</a></header>
+    <header className="siteHeader"><a className="brand" href="#top">FijiLaw AI</a><nav className="navLinks"><a href="#services">Get help</a><a href="#legal-directory">Find legal help</a><a href="#legal-help">Legal areas</a><a href="#trust">Trust & safety</a></nav><div className="headerRight"><span className={`serviceStatus ${apiStatus}`}>{apiStatus === 'online' ? 'Service online' : apiStatus === 'offline' ? 'Service unavailable' : 'Checking service'}</span><a className="headerCta" href="#triage">Start assessment</a></div></header>
+
+    {apiStatus === 'offline' && <section className="serviceAlert"><div><strong>FijiLaw AI legal service is temporarily unavailable.</strong><p>Your information has not been submitted. You can still browse this page, but assessments, document analysis and live directory data may be unavailable.</p></div><button onClick={() => checkApi()}>Retry connection</button></section>}
 
     <section className="hero" id="top"><div className="heroCopy"><p className="eyebrow">ACCESS TO JUSTICE · FIJI</p><h1>Understand your rights. Know your next step.</h1><p className="lead">FijiLaw AI helps you organize a legal problem, find relevant Fiji law, understand what information matters, and know when a qualified lawyer should review your case.</p><div className="heroActions"><a className="primaryCta" href="#triage">Tell me what happened</a><a className="secondaryCta" href="#legal-directory">Find legal help</a></div><div className="trustStrip"><span>Verified Fiji-law sources</span><span>Human review for high-risk matters</span><span>English · iTaukei · Fiji Hindi</span></div></div><aside className="heroCard"><span className="cardKicker">AI LEGAL TRIAGE</span><h2>Start with your story.</h2><p>You do not need to know the name of an Act or legal term. Describe the situation in your own words.</p><div className="miniFlow"><span>1</span><p>Explain what happened</p></div><div className="miniFlow"><span>2</span><p>FijiLaw identifies the legal area</p></div><div className="miniFlow"><span>3</span><p>Review verified authorities and next steps</p></div></aside></section>
 
     <section className="serviceSection" id="services"><div className="sectionHeading"><div><p className="eyebrow">HOW CAN WE HELP?</p><h2>Choose the way you want to start.</h2></div><p>FijiLaw AI is being designed as a complete legal-access gateway—from understanding a problem to finding professional assistance and managing a case.</p></div><div className="serviceGrid">{entryPaths.map(([title, desc, action, href], index) => <a className={`serviceCard ${index === 0 ? 'featuredService' : index === 1 ? 'activeService' : ''}`} href={href} key={title}><span className="serviceNumber">0{index + 1}</span><div><h3>{title}</h3><p>{desc}</p></div><span className="serviceAction">{action} →</span></a>)}</div></section>
 
-    <section className="directorySection" id="legal-directory"><div className="sectionHeading"><div><p className="eyebrow">FIND LEGAL HELP</p><h2>Lawyers, Legal Aid and legal offices.</h2></div><p>Search by town, service type or legal area. Government Legal Aid offices are marked as verified from the official Legal Aid Commission directory; private-firm listings remain clearly marked until practitioner verification is completed.</p></div><div className="directoryFilters"><input aria-label="Search legal services" value={directoryQuery} onChange={e=>setDirectoryQuery(e.target.value)} placeholder="Search office, address or practice area"/><select value={city} onChange={e=>setCity(e.target.value)}><option value="">All towns & cities</option>{cities.map(x=><option key={x}>{x}</option>)}</select><select value={serviceType} onChange={e=>setServiceType(e.target.value)}><option value="">All service types</option><option value="Legal Aid">Legal Aid</option><option value="Private Law Firm">Private law firms</option></select><select value={area} onChange={e=>setArea(e.target.value)}><option value="">All legal areas</option>{legalAreas.map(([x])=><option key={x}>{x}</option>)}</select></div>{directoryLoading && <p className="directoryStatus">Loading legal services…</p>}{directoryError && <p className="error">{directoryError}</p>}<div className="directoryGrid">{visibleServices.map(item=><article className="officeCard" key={item.id}><div className="officeTop"><span className={`verificationBadge ${item.verified ? 'verified' : 'pending'}`}>{item.verified ? 'Verified' : 'Verification pending'}</span><span>{item.type}</span></div><h3>{item.name}</h3><p className="officeAddress">{item.address}</p><div className="practicePills">{item.practiceAreas.slice(0,4).map(x=><span key={x}>{x}</span>)}</div><div className="officeActions">{item.phone && <a href={`tel:${item.phone.split('/')[0].trim().replace(/\s/g,'')}`}>Call</a>}{item.website && <a href={item.website} target="_blank" rel="noreferrer">Official website ↗</a>}</div><small>{item.verificationNote}</small></article>)}</div>{!directoryLoading && visibleServices.length===0 && <p className="directoryStatus">No matching legal services found. Try clearing one of the filters.</p>}</section>
+    <section className="directorySection" id="legal-directory"><div className="sectionHeading"><div><p className="eyebrow">FIND LEGAL HELP</p><h2>Lawyers, Legal Aid and legal offices.</h2></div><p>Search by town, service type or legal area. Government Legal Aid offices are marked as verified from the official directory; private-firm listings remain clearly marked until practitioner verification is completed.</p></div><div className="directoryFilters"><input aria-label="Search legal services" value={directoryQuery} onChange={e=>setDirectoryQuery(e.target.value)} placeholder="Search office, address or practice area"/><select value={city} onChange={e=>setCity(e.target.value)}><option value="">All towns & cities</option>{cities.map(x=><option key={x}>{x}</option>)}</select><select value={serviceType} onChange={e=>setServiceType(e.target.value)}><option value="">All service types</option><option value="Legal Aid">Legal Aid</option><option value="Private Law Firm">Private law firms</option></select><select value={area} onChange={e=>setArea(e.target.value)}><option value="">All legal areas</option>{legalAreas.map(([x])=><option key={x}>{x}</option>)}</select></div>{directoryLoading && <p className="directoryStatus">Loading legal services…</p>}{directoryError && <p className="error">{directoryError}</p>}<div className="directoryGrid">{visibleServices.map(item=><article className="officeCard" key={item.id}><div className="officeTop"><span className={`verificationBadge ${item.verified ? 'verified' : 'pending'}`}>{item.verified ? 'Verified' : 'Verification pending'}</span><span>{item.type}</span></div><h3>{item.name}</h3><p className="officeAddress">{item.address}</p><div className="practicePills">{item.practiceAreas.slice(0,4).map(x=><span key={x}>{x}</span>)}</div><div className="officeActions">{item.phone && <a href={`tel:${item.phone.split('/')[0].trim().replace(/\s/g,'')}`}>Call</a>}{item.website && <a href={item.website} target="_blank" rel="noreferrer">Official website ↗</a>}</div><small>{item.verificationNote}</small></article>)}</div>{!directoryLoading && visibleServices.length===0 && !directoryError && <p className="directoryStatus">No matching legal services found. Try clearing one of the filters.</p>}</section>
 
-    <section className="documentSection" id="document-upload"><div className="documentIntro"><p className="eyebrow">DOCUMENT ANALYSIS</p><h2>Upload a legal document.</h2><p>Use FijiLaw AI to extract readable text, identify the likely legal area, retrieve relevant Fiji authorities, and explain what information or next steps may matter.</p><div className="documentMeta"><span>PDF</span><span>DOCX</span><span>TXT</span><span>Maximum 8 MB</span></div></div><div className="uploadPanel"><form onSubmit={analyseDocument}><label className="uploadBox" htmlFor="legal-document"><span className="uploadIcon">↑</span><strong>{documentFile ? documentFile.name : 'Choose a legal document'}</strong><small>{documentFile ? `${Math.ceil(documentFile.size / 1024)} KB selected` : 'PDF, DOCX or TXT · Up to 8 MB'}</small><input id="legal-document" type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={chooseDocument} /></label><div className="row"><small>The MVP processes the uploaded file in memory and does not store it through this endpoint. Scanned image-only PDFs are not yet supported.</small><button className="submitButton" disabled={!documentFile || documentLoading}>{documentLoading ? 'Analysing…' : 'Analyse document'}</button></div></form></div></section>
+    <section className="documentSection" id="document-upload"><div className="documentIntro"><p className="eyebrow">DOCUMENT ANALYSIS</p><h2>Upload a legal document.</h2><p>Extract readable text, identify the likely legal area, retrieve relevant Fiji authorities, and understand possible next steps.</p><div className="documentMeta"><span>PDF</span><span>DOCX</span><span>TXT</span><span>Maximum 8 MB</span></div></div><div className="uploadPanel"><form onSubmit={analyseDocument}><label className="uploadBox" htmlFor="legal-document"><span className="uploadIcon">↑</span><strong>{documentFile ? documentFile.name : 'Choose a legal document'}</strong><small>{documentFile ? `${Math.ceil(documentFile.size / 1024)} KB selected` : 'PDF, DOCX or TXT · Up to 8 MB'}</small><input id="legal-document" type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={chooseDocument} /></label><div className="row"><small>The MVP processes the uploaded file in memory and does not store it through this endpoint. Scanned image-only PDFs are not yet supported.</small><button className="submitButton" disabled={!documentFile || documentLoading || apiStatus === 'offline'}>{documentLoading ? 'Analysing…' : 'Analyse document'}</button></div></form></div></section>
     {documentError && <p className="error">{documentError}</p>}{documentResult && <section className="documentOutput"><div className="documentSummary"><p className="eyebrow">DOCUMENT READ</p><h2>{documentResult.fileName}</h2><p>{documentResult.characterCount.toLocaleString()} readable characters extracted.</p><details><summary>Preview extracted text</summary><pre>{documentResult.preview}</pre></details><small>{documentResult.note}</small></div><Assessment result={documentResult.assessment} title="Document assessment" /></section>}
 
     <section className="section" id="legal-help"><div className="sectionHeading"><div><p className="eyebrow">LEGAL AREAS</p><h2>Common areas FijiLaw AI can help you navigate.</h2></div><p>Start with a category or simply describe your situation. The system will classify the matter and retrieve relevant Fiji legal sources.</p></div><div className="categoryGrid">{legalAreas.map(([title, desc]) => <button type="button" className="categoryCard" key={title} onClick={() => { setSituation(`I need help with ${title}. `); document.getElementById('triage')?.scrollIntoView({ behavior:'smooth' }); }}><span className="categoryArrow">↗</span><strong>{title}</strong><small>{desc}</small></button>)}</div></section>
 
-    <section className="triageSection" id="triage"><div className="triageIntro"><p className="eyebrow">TELL ME MY RIGHTS</p><h2>What happened?</h2><p>Describe the important facts in plain language. Include dates, what happened, who was involved, and what outcome you are seeking where possible.</p></div><section className="panel"><form onSubmit={submit}><label htmlFor="situation">Your legal situation</label><textarea id="situation" required minLength={10} value={situation} onChange={e=>setSituation(e.target.value)} placeholder="Example: My employer terminated me yesterday without giving me a written reason..."/><div className="row"><small>Do not include passwords, banking PINs, or unnecessary sensitive information.</small><button className="submitButton" disabled={loading}>{loading ? 'Assessing…' : 'Start legal triage'}</button></div></form></section></section>
+    <section className="triageSection" id="triage"><div className="triageIntro"><p className="eyebrow">TELL ME MY RIGHTS</p><h2>What happened?</h2><p>Describe the important facts in plain language. Include dates, what happened, who was involved, and what outcome you are seeking where possible.</p></div><section className="panel"><form onSubmit={submit}><label htmlFor="situation">Your legal situation</label><textarea id="situation" required minLength={10} value={situation} onChange={e=>setSituation(e.target.value)} placeholder="Example: My employer terminated me yesterday without giving me a written reason..."/><div className="row"><small>Do not include passwords, banking PINs, or unnecessary sensitive information.</small><button className="submitButton" disabled={loading || apiStatus === 'offline'}>{loading ? 'Assessing…' : 'Start legal triage'}</button></div></form></section></section>
     {error && <p className="error">{error}</p>}{result && <Assessment result={result}/>}<section className="section howSection" id="how-it-works"><div className="sectionHeading"><div><p className="eyebrow">HOW IT WORKS</p><h2>Legal guidance with controlled AI.</h2></div><p>FijiLaw AI is designed to retrieve law first, reason second, and escalate when a matter requires professional review.</p></div><div className="stepsGrid"><article><span>01</span><h3>Understand the facts</h3><p>The system organizes your description into legal issues, parties, dates, evidence and missing information.</p></article><article><span>02</span><h3>Retrieve Fiji law</h3><p>Relevant Acts and provisions are matched from a curated and progressively expanding Fiji legal knowledge base.</p></article><article><span>03</span><h3>Assess the next step</h3><p>You receive a structured assessment, verified authorities and a clear indication when human legal review is required.</p></article></div></section>
-    <section className="trustSection" id="trust"><div><p className="eyebrow light">TRUST & SAFETY</p><h2>Built to assist people, not invent law.</h2></div><div className="trustGrid"><article><strong>Verified sources</strong><p>Legal authorities are surfaced with official-source links rather than generated from memory alone.</p></article><article><strong>Human escalation</strong><p>Higher-risk matters can be flagged for review by a qualified legal practitioner.</p></article><article><strong>Traceable assessments</strong><p>Each assessment receives a reference identifier to support future audit and case workflows.</p></article><article><strong>Privacy-first design</strong><p>Users are prompted to avoid unnecessary sensitive information while secure case handling is developed.</p></article></div></section>
+    <section className="trustSection" id="trust"><div><p className="eyebrow light">TRUST & SAFETY</p><h2>Built to assist people, not invent law.</h2></div><div className="trustGrid"><article><strong>Verified sources</strong><p>Legal authorities are surfaced with official-source links rather than generated from memory alone.</p></article><article><strong>Human escalation</strong><p>Higher-risk matters can be flagged for review by a qualified legal practitioner.</p></article><article><strong>Traceable assessments</strong><p>Each assessment receives a reference identifier to support future audit and case workflows.</p></article><article><strong>Connection safety</strong><p>If the backend is unavailable, FijiLaw AI now stops submission and tells the user that their information was not sent.</p></article></div></section>
     <section className="languageSection"><p className="eyebrow">BUILT FOR FIJI</p><h2>Legal access should not depend on where you live or the language you are most comfortable using.</h2><div className="languagePills"><span>English</span><span>iTaukei</span><span>Fiji Hindi</span><span>More languages planned</span></div></section><footer><div><strong>FijiLaw AI</strong><p>AI-assisted access to legal information in Fiji.</p></div><p>Supervised MVP · Not a substitute for a qualified legal practitioner.</p></footer>
   </main>;
 }
