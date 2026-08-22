@@ -44,26 +44,32 @@ public static class MembershipEndpoints
             return Results.NoContent();
         });
 
-        app.MapPost("/api/auth/request-email-verification", async (EmailVerificationRequest request, HttpContext context, CancellationToken ct) =>
+        app.MapPost("/api/auth/request-email-verification", async (HttpRequest request, HttpContext context, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Email verification is not available until PostgreSQL is connected.", statusCode: 503);
+            var member = await ResolveMemberAsync(request, context, databaseUrl, ct);
+            if (member is null) return Results.Unauthorized();
+            if (member.EmailVerified) return Results.Ok(new { message = "Email is already verified.", deliveryConfigured = true, deliveryAccepted = true, alreadyVerified = true });
+
             var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
             var emailSender = context.RequestServices.GetRequiredService<ResendEmailSender>();
-            var created = await security.CreateVerificationTokenAsync(request.Email, ct);
+            var created = await security.CreateVerificationTokenAsync(member.Email, ct);
+            var delivered = false;
             if (created is not null)
             {
-                await security.RecordAuditAsync(created.Value.UserId, created.Value.UserId, "email_verification_requested", "Verification token issued", ct);
+                await security.RecordAuditAsync(created.Value.UserId, member.UserId, "email_verification_requested", "Verification token issued", ct);
                 if (emailSender.IsConfigured)
                 {
-                    var sent = await emailSender.SendVerificationAsync(created.Value.Email, created.Value.Token, ct);
-                    await security.RecordAuditAsync(created.Value.UserId, created.Value.UserId, sent ? "email_verification_sent" : "email_verification_send_failed", sent ? "Verification email accepted by provider" : "Verification email provider returned a failure", ct);
+                    delivered = await emailSender.SendVerificationAsync(created.Value.Email, created.Value.Token, ct);
+                    await security.RecordAuditAsync(created.Value.UserId, member.UserId, delivered ? "email_verification_sent" : "email_verification_send_failed", delivered ? "Verification email accepted by provider" : "Verification email provider returned a failure", ct);
                 }
             }
 
             return Results.Accepted(value: new
             {
-                message = "If the account exists and is not yet verified, a verification request has been created.",
-                deliveryConfigured = emailSender.IsConfigured
+                message = delivered ? "Verification email accepted for delivery." : "Verification request created.",
+                deliveryConfigured = emailSender.IsConfigured,
+                deliveryAccepted = delivered,
+                alreadyVerified = false
             });
         }).RequireRateLimiting("verification");
 
