@@ -26,17 +26,12 @@ public sealed class PostgresMembershipRepository(string connectionString)
 
         while (await reader.ReadAsync(ct))
         {
-            var entitlements = reader.GetFieldValue<string[]>(6);
             results.Add(new MembershipPlanSummary(
-                reader.GetString(0),
-                reader.GetString(1),
-                reader.GetString(2),
+                reader.GetString(0), reader.GetString(1), reader.GetString(2),
                 reader.IsDBNull(3) ? null : reader.GetDecimal(3),
                 reader.IsDBNull(4) ? null : reader.GetDecimal(4),
-                reader.GetBoolean(5),
-                entitlements));
+                reader.GetBoolean(5), reader.GetFieldValue<string[]>(6)));
         }
-
         return results;
     }
 
@@ -52,22 +47,34 @@ public sealed class PostgresMembershipRepository(string connectionString)
                   AND (s.current_period_end IS NULL OR s.current_period_end > NOW())
                 ORDER BY s.created_at DESC
                 LIMIT 1
+            ),
+            role_codes AS (
+                SELECT DISTINCT r.code
+                FROM user_roles ur JOIN roles r ON r.id=ur.role_id
+                WHERE ur.user_id=@userId
+            ),
+            effective_permissions AS (
+                SELECT DISTINCT p.code
+                FROM active_subscription a
+                JOIN subscription_plans sp ON sp.id=a.plan_id
+                JOIN plan_entitlements pe ON pe.plan_id=sp.id
+                JOIN permissions p ON p.id=pe.permission_id
+                UNION
+                SELECT DISTINCT p.code
+                FROM user_roles ur
+                JOIN role_permissions rp ON rp.role_id=ur.role_id
+                JOIN permissions p ON p.id=rp.permission_id
+                WHERE ur.user_id=@userId
             )
             SELECT u.id,
-                   COALESCE(a.plan_code, 'free') AS plan_code,
-                   COALESCE(a.status, 'active') AS subscription_status,
+                   COALESCE(a.plan_code,'free') AS plan_code,
+                   COALESCE(a.status,'active') AS subscription_status,
                    a.current_period_end,
-                   COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), ARRAY[]::text[]) AS roles,
-                   COALESCE(array_agg(DISTINCT p.code) FILTER (WHERE p.code IS NOT NULL), ARRAY[]::text[]) AS permissions
+                   COALESCE((SELECT array_agg(code ORDER BY code) FROM role_codes), ARRAY[]::text[]) AS roles,
+                   COALESCE((SELECT array_agg(code ORDER BY code) FROM effective_permissions), ARRAY[]::text[]) AS permissions
             FROM app_users u
-            LEFT JOIN user_roles ur ON ur.user_id = u.id
-            LEFT JOIN roles r ON r.id = ur.role_id
             LEFT JOIN active_subscription a ON TRUE
-            LEFT JOIN subscription_plans sp ON sp.code = COALESCE(a.plan_code, 'free')
-            LEFT JOIN plan_entitlements pe ON pe.plan_id = sp.id
-            LEFT JOIN permissions p ON p.id = pe.permission_id
-            WHERE u.id = @userId
-            GROUP BY u.id, a.plan_code, a.status, a.current_period_end;
+            WHERE u.id=@userId AND u.status='active';
             """;
 
         await using var connection = new NpgsqlConnection(connectionString);
@@ -75,16 +82,12 @@ public sealed class PostgresMembershipRepository(string connectionString)
         await using var command = new NpgsqlCommand(sql, connection);
         command.Parameters.AddWithValue("userId", userId);
         await using var reader = await command.ExecuteReaderAsync(ct);
-
         if (!await reader.ReadAsync(ct)) return null;
 
         return new MembershipAccessSnapshot(
-            reader.GetGuid(0),
-            reader.GetString(1),
-            reader.GetString(2),
+            reader.GetGuid(0), reader.GetString(1), reader.GetString(2),
             reader.IsDBNull(3) ? null : reader.GetFieldValue<DateTimeOffset>(3),
-            reader.GetFieldValue<string[]>(4),
-            reader.GetFieldValue<string[]>(5));
+            reader.GetFieldValue<string[]>(4), reader.GetFieldValue<string[]>(5));
     }
 
     public async Task RecordUsageAsync(UsageEntry entry, CancellationToken ct = default)
