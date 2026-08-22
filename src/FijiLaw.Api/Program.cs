@@ -9,6 +9,15 @@ var databaseUrl = builder.Configuration["DATABASE_URL"];
 var adminApiKey = builder.Configuration["ADMIN_API_KEY"];
 var openAiApiKey = builder.Configuration["OPENAI_API_KEY"];
 var openAiModel = builder.Configuration["OPENAI_MODEL"] ?? "gpt-5.6-luna";
+var configuredOrigins = new[]
+{
+    builder.Configuration["WebOrigin"],
+    builder.Configuration["AllowedWebOrigins"]
+}
+.Where(x => !string.IsNullOrWhiteSpace(x))
+.SelectMany(x => x!.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+.Select(x => x.TrimEnd('/'))
+.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
 if (string.IsNullOrWhiteSpace(databaseUrl))
 {
@@ -35,8 +44,9 @@ builder.Services.AddSingleton<ILegalAgent, LegalAgent>();
 builder.Services.AddSingleton<DocumentTextExtractor>();
 builder.Services.AddSingleton<LegalServicesDirectory>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
-    policy.WithOrigins(builder.Configuration["WebOrigin"] ?? "http://localhost:3000")
-          .AllowAnyHeader().AllowAnyMethod()));
+    policy.SetIsOriginAllowed(origin => IsAllowedWebOrigin(origin, configuredOrigins))
+          .AllowAnyHeader()
+          .AllowAnyMethod()));
 
 var app = builder.Build();
 app.UseCors();
@@ -57,7 +67,8 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
     aiProvider = modelProvider.Name,
     aiEnabled = modelProvider.IsEnabled,
     documentAnalysis = "pdf-docx-txt",
-    legalServicesDirectory = "available"
+    legalServicesDirectory = "available",
+    connectivity = "ready"
 }));
 
 app.MapGet("/api/legal-services", (string? city, string? type, string? area, string? q, LegalServicesDirectory directory) =>
@@ -136,5 +147,29 @@ app.MapPost("/api/admin/legal-sources", async (
 });
 
 app.Run();
+
+static bool IsAllowedWebOrigin(string origin, HashSet<string> configuredOrigins)
+{
+    if (configuredOrigins.Contains(origin.TrimEnd('/')))
+        return true;
+
+    if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+        return false;
+
+    if (uri.Scheme == Uri.UriSchemeHttp && (uri.Host == "localhost" || uri.Host == "127.0.0.1"))
+        return true;
+
+    if (uri.Scheme != Uri.UriSchemeHttps)
+        return false;
+
+    var host = uri.Host.ToLowerInvariant();
+    if (host == "fijilaw-ai-pasifika-solutions.vercel.app")
+        return true;
+
+    // Vercel preview deployments for this project follow the FijiLaw project prefix
+    // and the Pasifika Solutions team suffix. Do not allow arbitrary vercel.app origins.
+    return host.StartsWith("fijilaw-", StringComparison.Ordinal) &&
+           host.EndsWith("-pasifika-solutions.vercel.app", StringComparison.Ordinal);
+}
 
 public partial class Program { }
