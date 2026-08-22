@@ -19,7 +19,7 @@ public static class MembershipEndpoints
                 return Results.Ok(result);
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        });
+        }).RequireRateLimiting("auth");
 
         app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext context, CancellationToken ct) =>
         {
@@ -34,7 +34,7 @@ public static class MembershipEndpoints
             }
             catch (UnauthorizedAccessException) { return Results.Unauthorized(); }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
-        });
+        }).RequireRateLimiting("auth");
 
         app.MapPost("/api/auth/logout", async (HttpRequest request, HttpContext context, CancellationToken ct) =>
         {
@@ -65,7 +65,7 @@ public static class MembershipEndpoints
                 message = "If the account exists and is not yet verified, a verification request has been created.",
                 deliveryConfigured = emailSender.IsConfigured
             });
-        });
+        }).RequireRateLimiting("verification");
 
         app.MapPost("/api/auth/verify-email", async (EmailVerificationConfirmRequest request, HttpContext context, CancellationToken ct) =>
         {
@@ -73,7 +73,7 @@ public static class MembershipEndpoints
             var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
             var userId = await security.VerifyEmailAsync(request.Token, ct);
             return userId is null ? Results.BadRequest(new { error = "The verification token is invalid or expired." }) : Results.Ok(new { verified = true });
-        });
+        }).RequireRateLimiting("verification");
 
         app.MapGet("/api/membership/me", async (HttpRequest request, HttpContext context, CancellationToken ct) =>
         {
