@@ -1,0 +1,29 @@
+name: CI
+on:
+  push:
+    branches: [main, feature/mvp-foundation]
+  pull_request:
+    branches: [main]
+
+jobs:
+  dotnet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - run: dotnet restore FijiLaw.sln
+      - run: dotnet build FijiLaw.sln --configuration Release --no-restore
+      - run: dotnet test FijiLaw.sln --configuration Release --no-build
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/FijiLaw.Web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm install
+      - run: npm run build
