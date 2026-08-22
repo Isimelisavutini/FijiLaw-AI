@@ -1,6 +1,6 @@
 namespace FijiLaw.Domain;
 
-public sealed record RegisterRequest(string Email, string Password, string? DisplayName = null);
+public sealed record RegisterRequest(string Email, string Password, string? DisplayName = null, string? RequestedPlanCode = null);
 public sealed record LoginRequest(string Email, string Password);
 public sealed record EmailVerificationRequest(string Email);
 public sealed record EmailVerificationConfirmRequest(string Token);
