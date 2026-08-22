@@ -15,7 +15,7 @@ public static class MembershipEndpoints
                 var store = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
                 var result = await store.RegisterAsync(request, ct);
                 var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
-                await security.RecordAuditAsync(result.UserId, result.UserId, "member_registered", "Member account created", ct);
+                await security.RecordAuditAsync(result.UserId, result.UserId, "member_registered", $"Member account created; requested plan '{request.RequestedPlanCode ?? MembershipPlans.Free}'.", ct);
                 return Results.Ok(result);
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -48,11 +48,23 @@ public static class MembershipEndpoints
         {
             if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Email verification is not available until PostgreSQL is connected.", statusCode: 503);
             var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
+            var emailSender = context.RequestServices.GetRequiredService<ResendEmailSender>();
             var created = await security.CreateVerificationTokenAsync(request.Email, ct);
             if (created is not null)
+            {
                 await security.RecordAuditAsync(created.Value.UserId, created.Value.UserId, "email_verification_requested", "Verification token issued", ct);
+                if (emailSender.IsConfigured)
+                {
+                    var sent = await emailSender.SendVerificationAsync(created.Value.Email, created.Value.Token, ct);
+                    await security.RecordAuditAsync(created.Value.UserId, created.Value.UserId, sent ? "email_verification_sent" : "email_verification_send_failed", sent ? "Verification email accepted by provider" : "Verification email provider returned a failure", ct);
+                }
+            }
 
-            return Results.Accepted(value: new { message = "If the account exists and is not yet verified, a verification request has been created.", deliveryConfigured = false });
+            return Results.Accepted(value: new
+            {
+                message = "If the account exists and is not yet verified, a verification request has been created.",
+                deliveryConfigured = emailSender.IsConfigured
+            });
         });
 
         app.MapPost("/api/auth/verify-email", async (EmailVerificationConfirmRequest request, HttpContext context, CancellationToken ct) =>
