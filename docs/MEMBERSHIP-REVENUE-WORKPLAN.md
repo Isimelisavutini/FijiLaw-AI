@@ -148,39 +148,47 @@ Implementation evidence:
 - `src/FijiLaw.Infrastructure/PostgresMembershipRepository.cs`
 - Public plan catalogue endpoint: `GET /api/membership/plans`
 
-### M2 — Authentication & authorization
-- [ ] Implement sign-up/sign-in
-- [ ] Email verification
-- [ ] Password/security controls or managed identity provider
-- [ ] Implement role-based authorization
-- [ ] Implement subscription entitlement authorization
-- [ ] Add Dashboard.Access policy
-- [ ] Ensure Free users cannot access paid dashboard APIs
-- [ ] Ensure expired/cancelled subscriptions lose paid entitlements safely
-- [ ] Add admin override/audit rules
+### M2 — Authentication & authorization — CODE COMPLETE; LIVE VALIDATION PENDING
+- [x] Implement sign-up/sign-in
+- [x] Email verification token/confirmation flow
+- [x] Transactional verification sender integration (configuration still required)
+- [x] Password/security controls
+- [x] Password recovery/reset flow
+- [x] Implement role-based authorization
+- [x] Implement subscription entitlement authorization
+- [x] Add Dashboard.Access policy
+- [x] Ensure Free users cannot access paid dashboard APIs
+- [x] Ensure expired/cancelled subscriptions lose paid entitlements safely
+- [x] Add admin override/audit rules
+- [x] Add auth and verification/password-recovery rate limiting
+- [ ] Validate full flow against real PostgreSQL
+- [ ] Validate verification/reset email delivery through a verified sender domain
 
-### M3 — Dashboard gating
-- [ ] Create `/dashboard` route
-- [ ] Require authentication
-- [ ] Require Dashboard.Access entitlement
-- [ ] Free member sees upgrade page instead of dashboard
-- [ ] Personal Plus dashboard shell
-- [ ] Lawyer dashboard shell
-- [ ] Firm dashboard shell
-- [ ] Institutional dashboard shell
-- [ ] Admin dashboard shell
+### M3 — Dashboard gating — PARTIAL
+- [x] Create `/dashboard` route
+- [x] Require authentication
+- [x] Require Dashboard.Access entitlement
+- [x] Free member sees upgrade page instead of dashboard
+- [x] Generic paid member dashboard shell
+- [ ] Personal Plus dashboard tailored shell
+- [ ] Lawyer dashboard tailored shell
+- [ ] Firm dashboard tailored shell
+- [ ] Institutional dashboard tailored shell
+- [ ] Admin dashboard tailored shell
 
-### M4 — Plans & pricing UI
-- [ ] Create pricing page
-- [ ] Free plan card
-- [ ] Personal Plus plan card
-- [ ] Lawyer Professional plan card
-- [ ] Starter FJD 200 plan card
-- [ ] Professional FJD 350 plan card
-- [ ] Premium FJD 600 plan card
-- [ ] Institutional contact-sales option
-- [ ] Monthly/annual selector
-- [ ] Feature comparison
+### M4 — Plans & pricing UI — MOSTLY COMPLETE
+- [x] Create pricing page
+- [x] Free plan card
+- [x] Personal Plus plan card
+- [x] Lawyer Professional plan card
+- [x] Starter FJD 200 plan card
+- [x] Professional FJD 350 plan card
+- [x] Premium FJD 600 plan card
+- [x] Institutional contact/register option
+- [x] Monthly/annual selector
+- [x] Feature comparison/highlights
+- [x] Pricing-before-registration funnel
+- [x] Persist selected plan as registration intent
 - [ ] Upgrade/downgrade/cancel UX
 
 ### M5 — Billing
@@ -235,12 +243,13 @@ Implementation evidence:
 
 ### M9 — Security & compliance gates
 - [ ] Authorization tests for every paid API
-- [ ] Prevent client-side-only subscription gating
+- [x] Prevent client-side-only subscription gating
 - [ ] Payment/billing threat model
 - [ ] Privacy review for paid case storage
 - [ ] Data retention/deletion rules
-- [ ] Audit subscription and permission changes
-- [ ] Rate limiting by account/plan
+- [x] Audit role, registration, verification and password-reset security events
+- [x] Basic authentication/verification rate limiting
+- [ ] Rate limiting by account/plan for metered paid features
 - [ ] Abuse/fraud controls
 - [ ] Terms/subscription disclosures review
 
@@ -255,6 +264,9 @@ Implementation evidence:
 - [ ] AI cost per subscriber
 - [ ] Gross margin per plan
 - [ ] Law-firm lead/referral conversion
+
+## Pre-deployment rule
+See `docs/PRE-DEPLOYMENT-READINESS.md`. Deployment/promotion should be deferred until build/test gates and critical membership/security smoke tests pass.
 
 ## Definition of Done
 The membership programme is not complete until authorization is enforced server-side, billing state controls entitlements, paid dashboard routes cannot be accessed by free/expired users, subscription events are auditable, and revenue/AI-cost metrics can be measured.
