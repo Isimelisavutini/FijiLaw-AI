@@ -1,5 +1,6 @@
 import './styles.css';
 import './resilience.css';
+import './membership.css';
 import ApiResilience from './ApiResilience';
 import MembershipEntryBar from './MembershipEntryBar';
 
