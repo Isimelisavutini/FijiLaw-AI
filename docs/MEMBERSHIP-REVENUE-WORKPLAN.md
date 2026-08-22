@@ -129,17 +129,24 @@ Initial permission catalogue:
 
 ## Implementation checklist
 
-### M1 — Data model
-- [ ] Create User/Identity model integration
-- [ ] Create Role model
-- [ ] Create SubscriptionPlan model
-- [ ] Create Subscription model
-- [ ] Create Permission model
-- [ ] Create RolePermission/PlanEntitlement mapping
-- [ ] Create Organisation model
-- [ ] Create OrganisationMembership model
-- [ ] Create UsageLedger for AI/document limits
-- [ ] Create BillingEvent/Audit model
+### M1 — Data model — COMPLETED 2026-08-23
+- [x] Create User/Identity model integration
+- [x] Create Role model
+- [x] Create SubscriptionPlan model
+- [x] Create Subscription model
+- [x] Create Permission model
+- [x] Create RolePermission/PlanEntitlement mapping
+- [x] Create Organisation model
+- [x] Create OrganisationMembership model
+- [x] Create UsageLedger for AI/document limits
+- [x] Create BillingEvent/Audit model
+
+Implementation evidence:
+- `database/init.sql`
+- `src/FijiLaw.Domain/Membership.cs`
+- `src/FijiLaw.Infrastructure/PostgresMembershipInitializer.cs`
+- `src/FijiLaw.Infrastructure/PostgresMembershipRepository.cs`
+- Public plan catalogue endpoint: `GET /api/membership/plans`
 
 ### M2 — Authentication & authorization
 - [ ] Implement sign-up/sign-in
