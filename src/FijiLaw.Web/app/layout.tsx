@@ -1,4 +1,5 @@
 import './styles.css';
+import './resilience.css';
 import ApiResilience from './ApiResilience';
 
 export const metadata = {
