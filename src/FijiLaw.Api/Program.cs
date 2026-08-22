@@ -11,7 +11,7 @@ var openAiModel = builder.Configuration["OPENAI_MODEL"] ?? "gpt-5.6-luna";
 
 if (string.IsNullOrWhiteSpace(databaseUrl))
 {
-    builder.Services.AddSingleton<ILegalSourceRetriever, EmptyLegalSourceRetriever>();
+    builder.Services.AddSingleton<ILegalSourceRetriever, CuratedFijiLegalSourceRetriever>();
 }
 else
 {
@@ -49,7 +49,7 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
 {
     status = "ok",
     service = "FijiLaw.Api",
-    legalSourceStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "in-memory-fallback" : "postgresql",
+    legalSourceStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "curated-official-source-fallback" : "postgresql",
     legalSourceIngestion = string.IsNullOrWhiteSpace(databaseUrl) ? "unavailable" : "available",
     aiProvider = modelProvider.Name,
     aiEnabled = modelProvider.IsEnabled
