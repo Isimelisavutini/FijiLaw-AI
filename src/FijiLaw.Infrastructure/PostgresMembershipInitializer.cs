@@ -39,6 +39,11 @@ public sealed class PostgresMembershipInitializer(string connectionString)
             CREATE TABLE IF NOT EXISTS permissions (
               id UUID PRIMARY KEY DEFAULT gen_random_uuid(), code TEXT NOT NULL UNIQUE, description TEXT
             );
+            CREATE TABLE IF NOT EXISTS role_permissions (
+              role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+              permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+              PRIMARY KEY (role_id, permission_id)
+            );
             CREATE TABLE IF NOT EXISTS plan_entitlements (
               plan_id UUID NOT NULL REFERENCES subscription_plans(id) ON DELETE CASCADE,
               permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
@@ -147,6 +152,11 @@ public sealed class PostgresMembershipInitializer(string connectionString)
             INSERT INTO plan_entitlements (plan_id,permission_id)
             SELECT sp.id,p.id FROM subscription_plans sp CROSS JOIN permissions p
             WHERE sp.code='firm_premium' AND p.code='Directory.PriorityPlacement' ON CONFLICT DO NOTHING;
+
+            INSERT INTO role_permissions (role_id,permission_id)
+            SELECT r.id,p.id FROM roles r CROSS JOIN permissions p
+            WHERE r.code='platform_admin'
+            ON CONFLICT DO NOTHING;
 
             CREATE INDEX IF NOT EXISTS idx_subscriptions_user_status ON subscriptions(user_id,status);
             CREATE INDEX IF NOT EXISTS idx_subscriptions_org_status ON subscriptions(organisation_id,status);
