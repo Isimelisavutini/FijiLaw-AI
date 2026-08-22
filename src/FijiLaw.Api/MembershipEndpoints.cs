@@ -36,6 +36,45 @@ public static class MembershipEndpoints
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
         }).RequireRateLimiting("auth");
 
+        app.MapPost("/api/auth/forgot-password", async (ForgotPasswordRequest request, HttpContext context, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Password recovery is not available until PostgreSQL is connected.", statusCode: 503);
+            var auth = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
+            var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
+            var emailSender = context.RequestServices.GetRequiredService<ResendEmailSender>();
+            var created = await auth.CreatePasswordResetTokenAsync(request.Email, ct);
+            if (created is not null)
+            {
+                await security.RecordAuditAsync(created.Value.UserId, created.Value.UserId, "password_reset_requested", "Password reset token issued", ct);
+                if (emailSender.IsConfigured)
+                {
+                    var sent = await emailSender.SendPasswordResetAsync(created.Value.Email, created.Value.Token, ct);
+                    await security.RecordAuditAsync(created.Value.UserId, created.Value.UserId, sent ? "password_reset_email_sent" : "password_reset_email_failed", sent ? "Password reset email accepted by provider" : "Password reset email provider returned a failure", ct);
+                }
+            }
+
+            return Results.Accepted(value: new
+            {
+                message = "If an active account exists for that email, password reset instructions have been requested.",
+                deliveryConfigured = emailSender.IsConfigured
+            });
+        }).RequireRateLimiting("verification");
+
+        app.MapPost("/api/auth/reset-password", async (ResetPasswordRequest request, HttpContext context, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Password recovery is not available until PostgreSQL is connected.", statusCode: 503);
+            try
+            {
+                var auth = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
+                var userId = await auth.ResetPasswordAsync(request.Token, request.NewPassword, ct);
+                if (userId is null) return Results.BadRequest(new { error = "The password reset token is invalid or expired." });
+                var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
+                await security.RecordAuditAsync(userId.Value, userId.Value, "password_reset_completed", "Password changed and existing sessions revoked", ct);
+                return Results.Ok(new { reset = true });
+            }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        }).RequireRateLimiting("verification");
+
         app.MapPost("/api/auth/logout", async (HttpRequest request, HttpContext context, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.NoContent();
