@@ -31,6 +31,7 @@ else
     builder.Services.AddSingleton(_ => new PostgresMembershipInitializer(databaseUrl));
     builder.Services.AddSingleton(_ => new PostgresMembershipRepository(databaseUrl));
     builder.Services.AddSingleton(_ => new PostgresMembershipAuthStore(databaseUrl));
+    builder.Services.AddSingleton(_ => new PostgresMembershipSecurityStore(databaseUrl));
 }
 
 if (string.IsNullOrWhiteSpace(openAiApiKey))
@@ -60,6 +61,7 @@ if (!string.IsNullOrWhiteSpace(databaseUrl))
     await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresMembershipInitializer>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresMembershipAuthStore>().EnsureCreatedAsync();
+    await scope.ServiceProvider.GetRequiredService<PostgresMembershipSecurityStore>().EnsureCreatedAsync();
 }
 
 app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
@@ -70,6 +72,7 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
     legalSourceIngestion = string.IsNullOrWhiteSpace(databaseUrl) ? "unavailable" : "available",
     membershipStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "configuration-fallback" : "postgresql",
     membershipAuth = string.IsNullOrWhiteSpace(databaseUrl) ? "awaiting-postgresql" : "available",
+    membershipSecurity = string.IsNullOrWhiteSpace(databaseUrl) ? "awaiting-postgresql" : "available",
     aiProvider = modelProvider.Name,
     aiEnabled = modelProvider.IsEnabled,
     documentAnalysis = "pdf-docx-txt",
@@ -105,21 +108,11 @@ app.MapGet("/api/legal-services", (string? city, string? type, string? area, str
 
 app.MapPost("/api/legal/triage", async (LegalTriageRequest request, ILegalAgent agent, CancellationToken ct) =>
 {
-    try
-    {
-        return Results.Ok(await agent.TriageAsync(request, ct));
-    }
-    catch (ArgumentException ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
+    try { return Results.Ok(await agent.TriageAsync(request, ct)); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
-app.MapPost("/api/legal/documents/analyse", async (
-    IFormFile file,
-    DocumentTextExtractor extractor,
-    ILegalAgent agent,
-    CancellationToken ct) =>
+app.MapPost("/api/legal/documents/analyse", async (IFormFile file, DocumentTextExtractor extractor, ILegalAgent agent, CancellationToken ct) =>
 {
     try
     {
@@ -127,41 +120,17 @@ app.MapPost("/api/legal/documents/analyse", async (
         var triageText = $"I uploaded a legal document named '{Path.GetFileName(file.FileName)}'. Analyse the document context and identify the likely Fiji legal area, relevant authorities, important missing information and next steps. Document text:\n{text}";
         var assessment = await agent.TriageAsync(new LegalTriageRequest(triageText, Language: "en"), ct);
         var preview = text.Length > 1200 ? text[..1200] + "…" : text;
-
-        return Results.Ok(new
-        {
-            fileName = Path.GetFileName(file.FileName),
-            contentType = file.ContentType,
-            characterCount = text.Length,
-            preview,
-            assessment,
-            note = "The uploaded file is processed in memory for this MVP and is not stored by this endpoint."
-        });
+        return Results.Ok(new { fileName = Path.GetFileName(file.FileName), contentType = file.ContentType, characterCount = text.Length, preview, assessment, note = "The uploaded file is processed in memory for this MVP and is not stored by this endpoint." });
     }
-    catch (ArgumentException ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
-    catch
-    {
-        return Results.Problem("The document could not be read safely. Check that the file is a valid PDF, DOCX or TXT document.", statusCode: 400);
-    }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch { return Results.Problem("The document could not be read safely. Check that the file is a valid PDF, DOCX or TXT document.", statusCode: 400); }
 }).DisableAntiforgery();
 
-app.MapPost("/api/admin/legal-sources", async (
-    HttpRequest httpRequest,
-    LegalSourceInput input,
-    CancellationToken ct) =>
+app.MapPost("/api/admin/legal-sources", async (HttpRequest httpRequest, LegalSourceInput input, CancellationToken ct) =>
 {
-    if (string.IsNullOrWhiteSpace(databaseUrl))
-        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-
-    if (string.IsNullOrWhiteSpace(adminApiKey))
-        return Results.Problem("ADMIN_API_KEY is not configured.", statusCode: 503);
-
-    if (!httpRequest.Headers.TryGetValue("X-Admin-Key", out var suppliedKey) || suppliedKey != adminApiKey)
-        return Results.Unauthorized();
-
+    if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    if (string.IsNullOrWhiteSpace(adminApiKey)) return Results.Problem("ADMIN_API_KEY is not configured.", statusCode: 503);
+    if (!httpRequest.Headers.TryGetValue("X-Admin-Key", out var suppliedKey) || suppliedKey != adminApiKey) return Results.Unauthorized();
     try
     {
         var store = httpRequest.HttpContext.RequestServices.GetRequiredService<PostgresLegalSourceStore>();
@@ -169,34 +138,20 @@ app.MapPost("/api/admin/legal-sources", async (
         var id = await store.UpsertAsync(input, correlationId, ct);
         return Results.Ok(new { id, correlationId, input.Verified });
     }
-    catch (ArgumentException ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 
 app.Run();
 
 static bool IsAllowedWebOrigin(string origin, HashSet<string> configuredOrigins)
 {
-    if (configuredOrigins.Contains(origin.TrimEnd('/')))
-        return true;
-
-    if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
-        return false;
-
-    if (uri.Scheme == Uri.UriSchemeHttp && (uri.Host == "localhost" || uri.Host == "127.0.0.1"))
-        return true;
-
-    if (uri.Scheme != Uri.UriSchemeHttps)
-        return false;
-
+    if (configuredOrigins.Contains(origin.TrimEnd('/'))) return true;
+    if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
+    if (uri.Scheme == Uri.UriSchemeHttp && (uri.Host == "localhost" || uri.Host == "127.0.0.1")) return true;
+    if (uri.Scheme != Uri.UriSchemeHttps) return false;
     var host = uri.Host.ToLowerInvariant();
-    if (host == "fijilaw-ai-pasifika-solutions.vercel.app")
-        return true;
-
-    return host.StartsWith("fijilaw-", StringComparison.Ordinal) &&
-           host.EndsWith("-pasifika-solutions.vercel.app", StringComparison.Ordinal);
+    if (host == "fijilaw-ai-pasifika-solutions.vercel.app") return true;
+    return host.StartsWith("fijilaw-", StringComparison.Ordinal) && host.EndsWith("-pasifika-solutions.vercel.app", StringComparison.Ordinal);
 }
 
 public partial class Program { }
