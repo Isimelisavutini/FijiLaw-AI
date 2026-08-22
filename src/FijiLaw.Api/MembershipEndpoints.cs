@@ -52,7 +52,6 @@ public static class MembershipEndpoints
             if (created is not null)
                 await security.RecordAuditAsync(created.Value.UserId, created.Value.UserId, "email_verification_requested", "Verification token issued", ct);
 
-            // Do not reveal whether the email exists. Delivery is intentionally separated from token issuance.
             return Results.Accepted(value: new { message = "If the account exists and is not yet verified, a verification request has been created.", deliveryConfigured = false });
         });
 
@@ -74,10 +73,9 @@ public static class MembershipEndpoints
         {
             var member = await ResolveMemberAsync(request, context, databaseUrl, ct);
             if (member is null) return Results.Unauthorized();
-            if (!member.EmailVerified)
-                return Results.Json(new { error = "Verify your email before accessing paid member features." }, statusCode: 403);
-            if (!member.Permissions.Contains(MembershipPermissions.DashboardAccess, StringComparer.OrdinalIgnoreCase))
-                return Results.Json(new { error = "A paid membership is required to access the FijiLaw dashboard.", planCode = member.PlanCode }, statusCode: 403);
+            var decision = MembershipAuthorization.CanAccessDashboard(member);
+            if (!decision.Allowed)
+                return Results.Json(new { error = decision.Reason, planCode = member.PlanCode }, statusCode: 403);
 
             return Results.Ok(new DashboardSummary(member.UserId, member.Email, member.DisplayName, member.PlanCode,
                 member.SubscriptionStatus, member.Roles, member.Permissions, true));
@@ -87,8 +85,20 @@ public static class MembershipEndpoints
         {
             var member = await ResolveMemberAsync(request, context, databaseUrl, ct);
             if (member is null) return Results.Unauthorized();
-            var allowed = member.Permissions.Contains(permission, StringComparer.OrdinalIgnoreCase);
-            return Results.Ok(allowed ? AuthorizationDecision.Allow() : AuthorizationDecision.Deny("Permission not granted by active role or subscription."));
+            return Results.Ok(MembershipAuthorization.HasPermission(member, permission));
+        });
+
+        app.MapPost("/api/admin/membership/users/{targetUserId:guid}/roles/{roleCode}", async (
+            Guid targetUserId, string roleCode, HttpRequest request, HttpContext context, CancellationToken ct) =>
+        {
+            var actor = await ResolveMemberAsync(request, context, databaseUrl, ct);
+            if (actor is null) return Results.Unauthorized();
+            if (!actor.Roles.Contains(MembershipRoles.PlatformAdmin, StringComparer.OrdinalIgnoreCase))
+                return Results.Forbid();
+
+            var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
+            var assigned = await security.AssignRoleAsync(targetUserId, roleCode, actor.UserId, $"Platform administrator assigned role '{roleCode}'.", ct);
+            return assigned ? Results.Ok(new { assigned = true, targetUserId, roleCode }) : Results.BadRequest(new { error = "Role could not be assigned or was already present." });
         });
 
         return app;
