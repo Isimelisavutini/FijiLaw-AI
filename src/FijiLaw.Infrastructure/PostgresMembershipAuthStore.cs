@@ -8,6 +8,16 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
 {
     private const int Iterations = 210_000;
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
+    private static readonly HashSet<string> AllowedRequestedPlans = new(StringComparer.OrdinalIgnoreCase)
+    {
+        MembershipPlans.Free,
+        MembershipPlans.PersonalPlus,
+        MembershipPlans.LawyerProfessional,
+        MembershipPlans.FirmStarter,
+        MembershipPlans.FirmProfessional,
+        MembershipPlans.FirmPremium,
+        MembershipPlans.Institutional
+    };
 
     public async Task EnsureCreatedAsync(CancellationToken ct = default)
     {
@@ -44,6 +54,7 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
     {
         var email = NormalizeEmail(request.Email);
         ValidatePassword(request.Password);
+        var requestedPlan = NormalizeRequestedPlan(request.RequestedPlanCode);
         var salt = RandomNumberGenerator.GetBytes(32);
         var hash = HashPassword(request.Password, salt, Iterations);
         var userId = Guid.NewGuid();
@@ -53,14 +64,15 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
         await using var transaction = await connection.BeginTransactionAsync(ct);
 
         const string userSql = """
-            INSERT INTO app_users (id,email,display_name,email_verified,status)
-            VALUES (@id,@email,@displayName,FALSE,'active');
+            INSERT INTO app_users (id,email,display_name,requested_plan_code,email_verified,status)
+            VALUES (@id,@email,@displayName,@requestedPlan,FALSE,'active');
             """;
         await using (var cmd = new NpgsqlCommand(userSql, connection, transaction))
         {
             cmd.Parameters.AddWithValue("id", userId);
             cmd.Parameters.AddWithValue("email", email);
             cmd.Parameters.AddWithValue("displayName", (object?)request.DisplayName?.Trim() ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("requestedPlan", (object?)requestedPlan ?? DBNull.Value);
             try { await cmd.ExecuteNonQueryAsync(ct); }
             catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
             {
@@ -185,6 +197,14 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(email) || !email.Contains('@')) throw new ArgumentException("A valid email is required.");
         return email.Trim().ToLowerInvariant();
+    }
+
+    private static string? NormalizeRequestedPlan(string? requestedPlanCode)
+    {
+        if (string.IsNullOrWhiteSpace(requestedPlanCode)) return MembershipPlans.Free;
+        var normalized = requestedPlanCode.Trim().ToLowerInvariant();
+        if (!AllowedRequestedPlans.Contains(normalized)) throw new ArgumentException("The selected membership plan is not valid.");
+        return normalized;
     }
 
     private static void ValidatePassword(string password)
