@@ -28,6 +28,8 @@ else
     builder.Services.AddSingleton<ILegalSourceRetriever>(_ => new PostgresLegalSourceRetriever(databaseUrl));
     builder.Services.AddSingleton(_ => new DatabaseInitializer(databaseUrl));
     builder.Services.AddSingleton(_ => new PostgresLegalSourceStore(databaseUrl));
+    builder.Services.AddSingleton(_ => new PostgresMembershipInitializer(databaseUrl));
+    builder.Services.AddSingleton(_ => new PostgresMembershipRepository(databaseUrl));
 }
 
 if (string.IsNullOrWhiteSpace(openAiApiKey))
@@ -54,8 +56,8 @@ app.UseCors();
 if (!string.IsNullOrWhiteSpace(databaseUrl))
 {
     using var scope = app.Services.CreateScope();
-    var initializer = scope.ServiceProvider.GetRequiredService<DatabaseInitializer>();
-    await initializer.EnsureCreatedAsync();
+    await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().EnsureCreatedAsync();
+    await scope.ServiceProvider.GetRequiredService<PostgresMembershipInitializer>().EnsureCreatedAsync();
 }
 
 app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
@@ -64,12 +66,34 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
     service = "FijiLaw.Api",
     legalSourceStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "curated-official-source-fallback" : "postgresql",
     legalSourceIngestion = string.IsNullOrWhiteSpace(databaseUrl) ? "unavailable" : "available",
+    membershipStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "configuration-fallback" : "postgresql",
     aiProvider = modelProvider.Name,
     aiEnabled = modelProvider.IsEnabled,
     documentAnalysis = "pdf-docx-txt",
     legalServicesDirectory = "available",
     connectivity = "ready"
 }));
+
+app.MapGet("/api/membership/plans", async (HttpContext context, CancellationToken ct) =>
+{
+    if (!string.IsNullOrWhiteSpace(databaseUrl))
+    {
+        var repository = context.RequestServices.GetRequiredService<PostgresMembershipRepository>();
+        return Results.Ok(new { items = await repository.GetPlansAsync(ct), source = "postgresql" });
+    }
+
+    var fallback = new[]
+    {
+        new MembershipPlanSummary("free", "Free", "citizen", 0m, 0m, false, Array.Empty<string>()),
+        new MembershipPlanSummary("personal_plus", "Personal Plus", "citizen", 20m, 200m, true, new[] { MembershipPermissions.DashboardAccess, MembershipPermissions.CasesCreate, MembershipPermissions.CasesViewOwn, MembershipPermissions.DocumentsAnalyse, MembershipPermissions.DocumentsStore, MembershipPermissions.ReferralsRequest, MembershipPermissions.BillingView }),
+        new MembershipPlanSummary("lawyer_professional", "Lawyer Professional", "lawyer", 100m, 1000m, true, new[] { MembershipPermissions.DashboardAccess, MembershipPermissions.CasesManage, MembershipPermissions.DocumentsAnalyse, MembershipPermissions.ReferralsManage, MembershipPermissions.LeadsView, MembershipPermissions.LeadsManage, MembershipPermissions.LawyerProfileManage, MembershipPermissions.AnalyticsView, MembershipPermissions.BillingView }),
+        new MembershipPlanSummary("firm_starter", "Law Firm Starter", "law_firm", 200m, 2000m, true, new[] { MembershipPermissions.DashboardAccess, MembershipPermissions.CasesManage, MembershipPermissions.DocumentsAnalyse, MembershipPermissions.ReferralsManage, MembershipPermissions.LeadsView, MembershipPermissions.LeadsManage, MembershipPermissions.FirmManage, MembershipPermissions.AnalyticsView, MembershipPermissions.BillingView }),
+        new MembershipPlanSummary("firm_professional", "Law Firm Professional", "law_firm", 350m, 3500m, true, new[] { MembershipPermissions.DashboardAccess, MembershipPermissions.CasesManage, MembershipPermissions.DocumentsAnalyse, MembershipPermissions.ReferralsManage, MembershipPermissions.LeadsView, MembershipPermissions.LeadsManage, MembershipPermissions.FirmManage, MembershipPermissions.FirmUsersManage, MembershipPermissions.AnalyticsView, MembershipPermissions.BillingView }),
+        new MembershipPlanSummary("firm_premium", "Law Firm Premium", "law_firm", 600m, 6000m, true, new[] { MembershipPermissions.DashboardAccess, MembershipPermissions.CasesManage, MembershipPermissions.DocumentsAnalyse, MembershipPermissions.ReferralsManage, MembershipPermissions.LeadsView, MembershipPermissions.LeadsManage, MembershipPermissions.FirmManage, MembershipPermissions.FirmUsersManage, MembershipPermissions.AnalyticsView, MembershipPermissions.BillingView, MembershipPermissions.DirectoryPriorityPlacement }),
+        new MembershipPlanSummary("institutional", "Institutional", "institution", null, null, true, new[] { MembershipPermissions.DashboardAccess })
+    };
+    return Results.Ok(new { items = fallback, source = "configuration-fallback" });
+});
 
 app.MapGet("/api/legal-services", (string? city, string? type, string? area, string? q, LegalServicesDirectory directory) =>
     Results.Ok(new { items = directory.Search(city, type, area, q), cities = directory.Cities() }));
@@ -166,8 +190,6 @@ static bool IsAllowedWebOrigin(string origin, HashSet<string> configuredOrigins)
     if (host == "fijilaw-ai-pasifika-solutions.vercel.app")
         return true;
 
-    // Vercel preview deployments for this project follow the FijiLaw project prefix
-    // and the Pasifika Solutions team suffix. Do not allow arbitrary vercel.app origins.
     return host.StartsWith("fijilaw-", StringComparison.Ordinal) &&
            host.EndsWith("-pasifika-solutions.vercel.app", StringComparison.Ordinal);
 }
