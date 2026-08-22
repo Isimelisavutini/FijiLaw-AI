@@ -55,7 +55,10 @@ export default function AccountPage() {
     setLoading(true); setMessage('');
     try{
       const path=mode==='login'?'/api/auth/login':'/api/auth/register';
-      const response=await fetchWithTimeout(`${API_BASE}${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(mode==='login'?{email,password}:{email,password,displayName})},15000);
+      const payload=mode==='login'
+        ? {email,password}
+        : {email,password,displayName,requestedPlanCode:selectedPlan||'free'};
+      const response=await fetchWithTimeout(`${API_BASE}${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)},15000);
       if(!response.ok) throw new Error(await readApiError(response,mode==='login'?'Sign in could not be completed.':'Account registration could not be completed.'));
       const body=await response.json();
       if(!body?.accessToken||!body?.email) throw new Error('The member service returned an incomplete response. Please try again.');
@@ -89,7 +92,7 @@ export default function AccountPage() {
     {registered ? <section style={{background:'#fff',border:'1px solid #d5ddd7',borderRadius:18,padding:28,marginTop:28}}>
       <h2 style={{fontFamily:'Georgia,serif',fontWeight:500,fontSize:30,marginTop:0}}>Verify your email before using paid features.</h2>
       <p style={{lineHeight:1.7,color:'#53635a'}}>{message}</p>
-      {selectedPlan&&<p style={{lineHeight:1.6,color:'#53635a'}}>Your selected plan is <strong>{selectedPlan.replaceAll('_',' ')}</strong>. Subscription activation occurs only after a completed payment flow.</p>}
+      {selectedPlan&&<p style={{lineHeight:1.6,color:'#53635a'}}>Your selected plan is <strong>{selectedPlan.replaceAll('_',' ')}</strong>. This preference has been recorded, but subscription activation occurs only after a completed payment flow.</p>}
       <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:20}}>
         <button onClick={()=>void requestVerification(email)} style={{...primary,width:'auto'}}>Request verification again</button>
         <a href="/dashboard" style={linkButton}>Continue to dashboard</a>
