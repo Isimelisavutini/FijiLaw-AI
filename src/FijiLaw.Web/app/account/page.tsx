@@ -73,6 +73,7 @@ export default function AccountPage() {
   }
 
   const unavailable=membershipHealth==='unavailable';
+  const actionDisabled=loading||membershipHealth!=='ready';
 
   return <main style={{maxWidth:760,margin:'0 auto',padding:'54px 24px 80px',fontFamily:'Inter,system-ui,sans-serif',color:'#16231c'}}>
     <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'center'}}><a href="/" style={{color:'#173f2b',fontWeight:800,textDecoration:'none'}}>FijiLaw AI</a><a href="/pricing" style={{color:'#173f2b',fontWeight:800,textDecoration:'none'}}>View Pricing</a></div>
@@ -97,11 +98,11 @@ export default function AccountPage() {
     </section> : <>
       <div style={{display:'flex',gap:8,margin:'28px 0'}}><button type="button" onClick={()=>setMode('login')} style={tab(mode==='login')}>Sign in</button><button type="button" onClick={()=>setMode('register')} style={tab(mode==='register')}>Register</button></div>
       <form onSubmit={submit} style={{background:'#fff',border:'1px solid #d5ddd7',borderRadius:18,padding:28}}>
-        {mode==='register'&&<><label style={label}>Name</label><input style={input} value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Your name" autoComplete="name"/></>}
+        {mode==='register'&&<><label style={label}>Name</label><input style={input} value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Your name" autoComplete="name" disabled={unavailable}/></>}
         <label style={label}>Email</label><input style={input} type="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" disabled={unavailable}/>
         <label style={label}>Password</label><input style={input} type="password" required minLength={10} value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 10 characters" autoComplete={mode==='login'?'current-password':'new-password'} disabled={unavailable}/>
         {message&&<p role="alert" style={{background:'#fff0f0',padding:12,borderRadius:8,lineHeight:1.5}}>{message}</p>}
-        <button disabled={loading||membershipHealth!=='ready'} style={{...primary,opacity:loading||membershipHealth!=='ready'?.58:1,cursor:loading||membershipHealth!=='ready'?'not-allowed':'pointer'}}>{loading?'Please wait…':membershipHealth==='checking'?'Checking member service…':unavailable?'Member service unavailable':mode==='login'?'Sign in':'Create account'}</button>
+        <button disabled={actionDisabled} style={{...primary,opacity:actionDisabled?0.58:1,cursor:actionDisabled?'not-allowed':'pointer'}}>{loading?'Please wait…':membershipHealth==='checking'?'Checking member service…':unavailable?'Member service unavailable':mode==='login'?'Sign in':'Create account'}</button>
       </form>
     </>}
     <p style={{fontSize:13,color:'#6a776f',marginTop:18}}>Passwords are never stored in plain text. Paid dashboard access is enforced by the API, not only by the browser.</p>
