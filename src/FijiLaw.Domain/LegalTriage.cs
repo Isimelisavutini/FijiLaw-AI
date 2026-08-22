@@ -23,4 +23,5 @@ public sealed record LegalTriageResult(
     LegalRiskLevel RiskLevel,
     bool HumanReviewRequired,
     string Disclaimer,
-    string CorrelationId);
+    string CorrelationId,
+    IReadOnlyList<string>? LegalDomains = null);
