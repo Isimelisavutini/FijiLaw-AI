@@ -109,6 +109,7 @@ export default function AccountPage() {
         {mode==='register'&&<><label style={label}>Name</label><input style={input} value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Your name" autoComplete="name" disabled={unavailable}/></>}
         <label style={label}>Email</label><input style={input} type="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" disabled={unavailable}/>
         <label style={label}>Password</label><input style={input} type="password" required minLength={10} value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 10 characters" autoComplete={mode==='login'?'current-password':'new-password'} disabled={unavailable}/>
+        {mode==='login'&&<div style={{textAlign:'right',margin:'2px 0 14px'}}><a href="/forgot-password" style={{color:'#173f2b',fontSize:13,fontWeight:800}}>Forgot password?</a></div>}
         {message&&<p role="alert" style={{background:'#fff0f0',padding:12,borderRadius:8,lineHeight:1.5}}>{message}</p>}
         <button disabled={actionDisabled} style={{...primary,opacity:actionDisabled?0.58:1,cursor:actionDisabled?'not-allowed':'pointer'}}>{loading?'Please wait…':membershipHealth==='checking'?'Checking member service…':unavailable?'Member service unavailable':mode==='login'?'Sign in':'Create account'}</button>
       </form>
