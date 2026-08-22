@@ -9,6 +9,9 @@ var databaseUrl = builder.Configuration["DATABASE_URL"];
 var adminApiKey = builder.Configuration["ADMIN_API_KEY"];
 var openAiApiKey = builder.Configuration["OPENAI_API_KEY"];
 var openAiModel = builder.Configuration["OPENAI_MODEL"] ?? "gpt-5.6-luna";
+var resendApiKey = builder.Configuration["RESEND_API_KEY"];
+var emailFrom = builder.Configuration["EMAIL_FROM"];
+var publicWebUrl = builder.Configuration["PUBLIC_WEB_URL"];
 var configuredOrigins = new[]
 {
     builder.Configuration["WebOrigin"],
@@ -33,6 +36,12 @@ else
     builder.Services.AddSingleton(_ => new PostgresMembershipAuthStore(databaseUrl));
     builder.Services.AddSingleton(_ => new PostgresMembershipSecurityStore(databaseUrl));
 }
+
+builder.Services.AddSingleton(_ => new ResendEmailSender(
+    new HttpClient { Timeout = TimeSpan.FromSeconds(20) },
+    resendApiKey,
+    emailFrom,
+    publicWebUrl));
 
 if (string.IsNullOrWhiteSpace(openAiApiKey))
 {
@@ -64,7 +73,7 @@ if (!string.IsNullOrWhiteSpace(databaseUrl))
     await scope.ServiceProvider.GetRequiredService<PostgresMembershipSecurityStore>().EnsureCreatedAsync();
 }
 
-app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
+app.MapGet("/health", (ILanguageModelProvider modelProvider, ResendEmailSender emailSender) => Results.Ok(new
 {
     status = "ok",
     service = "FijiLaw.Api",
@@ -73,6 +82,7 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
     membershipStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "configuration-fallback" : "postgresql",
     membershipAuth = string.IsNullOrWhiteSpace(databaseUrl) ? "awaiting-postgresql" : "available",
     membershipSecurity = string.IsNullOrWhiteSpace(databaseUrl) ? "awaiting-postgresql" : "available",
+    emailDelivery = emailSender.IsConfigured ? "configured" : "awaiting-resend-config",
     aiProvider = modelProvider.Name,
     aiEnabled = modelProvider.IsEnabled,
     documentAnalysis = "pdf-docx-txt",
