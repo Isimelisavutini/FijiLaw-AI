@@ -23,4 +23,28 @@ public class LegalAgentTests
         Assert.Equal(LegalRiskLevel.High, result.RiskLevel);
         Assert.True(result.HumanReviewRequired);
     }
+
+    [Fact]
+    public async Task Faulty_goods_retrieve_section_level_consumer_authority()
+    {
+        var retriever = new CuratedFijiLegalSourceRetriever();
+        var authorities = await retriever.SearchAsync("The fridge I bought is faulty and the retailer refuses a refund.");
+
+        Assert.Contains(authorities, a =>
+            a.Title == "Fijian Competition and Consumer Commission Act 2010" &&
+            a.Provision is not null &&
+            a.Provision.Contains("s 114"));
+    }
+
+    [Fact]
+    public async Task Summary_dismissal_retrieves_section_33()
+    {
+        var retriever = new CuratedFijiLegalSourceRetriever();
+        var authorities = await retriever.SearchAsync("My employer dismissed me immediately for alleged misconduct.");
+
+        Assert.Contains(authorities, a =>
+            a.Title == "Employment Relations Act 2007" &&
+            a.Provision is not null &&
+            a.Provision.Contains("s 33"));
+    }
 }
