@@ -115,6 +115,28 @@ public sealed class PostgresMembershipSecurityStore(string connectionString)
         return userId;
     }
 
+    public async Task<bool> AssignRoleAsync(Guid targetUserId, string roleCode, Guid actorUserId, string reason, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(roleCode)) return false;
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+
+        const string sql = """
+            INSERT INTO user_roles (user_id,role_id)
+            SELECT @targetUserId,id FROM roles WHERE code=@roleCode
+            ON CONFLICT DO NOTHING;
+            """;
+        await using var command = new NpgsqlCommand(sql, connection, transaction);
+        command.Parameters.AddWithValue("targetUserId", targetUserId);
+        command.Parameters.AddWithValue("roleCode", roleCode.Trim().ToLowerInvariant());
+        var affected = await command.ExecuteNonQueryAsync(ct);
+
+        await RecordAuditAsync(connection, transaction, targetUserId, actorUserId, "role_assigned", reason, ct);
+        await transaction.CommitAsync(ct);
+        return affected > 0;
+    }
+
     public async Task RecordAuditAsync(Guid? userId, Guid? actorUserId, string eventType, string? reason, CancellationToken ct = default)
     {
         await using var connection = new NpgsqlConnection(connectionString);
