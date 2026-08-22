@@ -1,0 +1,36 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FijiLaw.Domain", "src\FijiLaw.Domain\FijiLaw.Domain.csproj", "{4E5B56B7-E512-42A9-BA48-4DA5428AF231}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FijiLaw.AI", "src\FijiLaw.AI\FijiLaw.AI.csproj", "{C2CFCCDD-229A-4741-A3D7-6E0B15A521F2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FijiLaw.Api", "src\FijiLaw.Api\FijiLaw.Api.csproj", "{F6C229C6-87AB-4E5D-B6B6-56A125A9C95C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "FijiLaw.AI.Tests", "tests\FijiLaw.AI.Tests\FijiLaw.AI.Tests.csproj", "{6E4454DD-334D-4B6D-8DF6-7A50DD97B318}"
+EndProject
+Global
+  GlobalSection(SolutionConfigurationPlatforms) = preSolution
+    Debug|Any CPU = Debug|Any CPU
+    Release|Any CPU = Release|Any CPU
+  EndGlobalSection
+  GlobalSection(ProjectConfigurationPlatforms) = postSolution
+    {4E5B56B7-E512-42A9-BA48-4DA5428AF231}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {4E5B56B7-E512-42A9-BA48-4DA5428AF231}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {4E5B56B7-E512-42A9-BA48-4DA5428AF231}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {4E5B56B7-E512-42A9-BA48-4DA5428AF231}.Release|Any CPU.Build.0 = Release|Any CPU
+    {C2CFCCDD-229A-4741-A3D7-6E0B15A521F2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {C2CFCCDD-229A-4741-A3D7-6E0B15A521F2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {C2CFCCDD-229A-4741-A3D7-6E0B15A521F2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {C2CFCCDD-229A-4741-A3D7-6E0B15A521F2}.Release|Any CPU.Build.0 = Release|Any CPU
+    {F6C229C6-87AB-4E5D-B6B6-56A125A9C95C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {F6C229C6-87AB-4E5D-B6B6-56A125A9C95C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {F6C229C6-87AB-4E5D-B6B6-56A125A9C95C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {F6C229C6-87AB-4E5D-B6B6-56A125A9C95C}.Release|Any CPU.Build.0 = Release|Any CPU
+    {6E4454DD-334D-4B6D-8DF6-7A50DD97B318}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+    {6E4454DD-334D-4B6D-8DF6-7A50DD97B318}.Debug|Any CPU.Build.0 = Debug|Any CPU
+    {6E4454DD-334D-4B6D-8DF6-7A50DD97B318}.Release|Any CPU.ActiveCfg = Release|Any CPU
+    {6E4454DD-334D-4B6D-8DF6-7A50DD97B318}.Release|Any CPU.Build.0 = Release|Any CPU
+  EndGlobalSection
+EndGlobal
