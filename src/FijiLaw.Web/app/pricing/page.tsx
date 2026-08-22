@@ -1,9 +1,19 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { API_BASE, fetchWithTimeout } from '../../lib/api';
 
 type Plan={code:string;name:string;audience:string;monthlyPriceFjd:number|null;annualPriceFjd:number|null;isPaid:boolean;entitlements:string[]};
-const apiBase=process.env.NEXT_PUBLIC_API_URL??'https://fijilaw-api-production-production.up.railway.app';
+
+const fallbackPlans:Plan[]=[
+  {code:'free',name:'Free',audience:'citizen',monthlyPriceFjd:0,annualPriceFjd:0,isPaid:false,entitlements:[]},
+  {code:'personal_plus',name:'Personal Plus',audience:'citizen',monthlyPriceFjd:20,annualPriceFjd:200,isPaid:true,entitlements:['Dashboard.Access','Cases.Create','Cases.ViewOwn','Documents.Analyse','Documents.Store','Referrals.Request']},
+  {code:'lawyer_professional',name:'Lawyer Professional',audience:'lawyer',monthlyPriceFjd:100,annualPriceFjd:1000,isPaid:true,entitlements:['Dashboard.Access','Cases.Manage','Documents.Analyse','Referrals.Manage','Leads.View','Analytics.View']},
+  {code:'firm_starter',name:'Law Firm Starter',audience:'law_firm',monthlyPriceFjd:200,annualPriceFjd:2000,isPaid:true,entitlements:['Dashboard.Access','Cases.Manage','Referrals.Manage','Leads.View','Firm.Manage','Analytics.View']},
+  {code:'firm_professional',name:'Law Firm Professional',audience:'law_firm',monthlyPriceFjd:350,annualPriceFjd:3500,isPaid:true,entitlements:['Dashboard.Access','Cases.Manage','Referrals.Manage','Leads.Manage','Firm.Manage','FirmUsers.Manage','Analytics.View']},
+  {code:'firm_premium',name:'Law Firm Premium',audience:'law_firm',monthlyPriceFjd:600,annualPriceFjd:6000,isPaid:true,entitlements:['Dashboard.Access','Cases.Manage','Referrals.Manage','Leads.Manage','Firm.Manage','FirmUsers.Manage','Analytics.View','Directory.PriorityPlacement']},
+  {code:'institutional',name:'Institutional',audience:'institution',monthlyPriceFjd:null,annualPriceFjd:null,isPaid:true,entitlements:['Dashboard.Access']}
+];
 
 const planDescriptions:Record<string,string>={
   free:'For people who want public legal information, limited AI triage and legal-service discovery without a paid dashboard.',
@@ -26,8 +36,16 @@ const highlights:Record<string,string[]>={
 };
 
 export default function PricingPage(){
-  const [plans,setPlans]=useState<Plan[]>([]); const [annual,setAnnual]=useState(false); const [loading,setLoading]=useState(true);
-  useEffect(()=>{fetch(`${apiBase}/api/membership/plans`,{cache:'no-store'}).then(r=>r.json()).then(b=>setPlans(b.items??[])).catch(()=>{}).finally(()=>setLoading(false));},[]);
+  const [plans,setPlans]=useState<Plan[]>(fallbackPlans); const [annual,setAnnual]=useState(false); const [source,setSource]=useState<'api'|'fallback'>('fallback');
+  useEffect(()=>{void loadPlans();},[]);
+  async function loadPlans(){
+    try{
+      const response=await fetchWithTimeout(`${API_BASE}/api/membership/plans`,{cache:'no-store'},8000);
+      if(!response.ok)return;
+      const body=await response.json();
+      if(Array.isArray(body.items)&&body.items.length){setPlans(body.items);setSource('api');}
+    }catch{/* keep reviewed fallback pricing visible */}
+  }
   const ordered=useMemo(()=>plans,[plans]);
 
   return <main style={{maxWidth:1180,margin:'0 auto',padding:'42px 24px 90px',fontFamily:'Inter,system-ui,sans-serif',color:'#16231c'}}>
@@ -35,41 +53,12 @@ export default function PricingPage(){
       <a href="/" style={{fontWeight:800,color:'#16231c',textDecoration:'none',fontSize:21}}>FijiLaw AI</a>
       <div style={{display:'flex',gap:10,alignItems:'center'}}><a href="/account?mode=login" style={smallLink}>Sign In</a><a href="/account?mode=register" style={smallCta}>Register</a></div>
     </header>
-
-    <section style={{padding:'58px 0 28px'}}>
-      <p style={{letterSpacing:'.14em',fontSize:12,fontWeight:800,color:'#587063',margin:0}}>PRICING & MEMBERSHIP</p>
-      <h1 style={{fontFamily:'Georgia,serif',fontWeight:500,fontSize:'clamp(42px,7vw,68px)',lineHeight:1.02,margin:'10px 0 18px',maxWidth:920}}>Know the price before you create an account.</h1>
-      <p style={{fontSize:19,lineHeight:1.65,color:'#58685e',maxWidth:820}}>FijiLaw AI keeps public access available for free. Registration is free, while paid memberships unlock the private dashboard and persistent legal workflows. Choose a plan first, then register or sign in.</p>
-      <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:22}}><span style={trustPill}>Free public access remains available</span><span style={trustPill}>Dashboard is a paid-member feature</span><span style={trustPill}>Prices shown in Fijian Dollars</span></div>
-    </section>
-
-    <section style={{background:'#173f2b',color:'#fff',borderRadius:20,padding:24,display:'grid',gridTemplateColumns:'1.2fr .8fr',gap:28,alignItems:'center',margin:'10px 0 34px'}}>
-      <div><p style={{fontSize:12,letterSpacing:'.12em',fontWeight:800,color:'#c9d9cf',margin:'0 0 8px'}}>BEFORE YOU REGISTER</p><h2 style={{fontFamily:'Georgia,serif',fontSize:32,fontWeight:500,margin:'0 0 10px'}}>Choose whether you need a free account or a paid dashboard.</h2><p style={{lineHeight:1.6,color:'#d6e1da',margin:0}}>You can create a free account without paying. If you need saved cases, document history, referrals or professional tools, choose a paid plan below.</p></div>
-      <div style={{display:'flex',gap:10,justifyContent:'flex-end',flexWrap:'wrap'}}><a href="/account?mode=register" style={lightCta}>Create Free Account</a><a href="#plans" style={outlineLight}>Compare Paid Plans</a></div>
-    </section>
-
+    <section style={{padding:'58px 0 28px'}}><p style={{letterSpacing:'.14em',fontSize:12,fontWeight:800,color:'#587063',margin:0}}>PRICING & MEMBERSHIP</p><h1 style={{fontFamily:'Georgia,serif',fontWeight:500,fontSize:'clamp(42px,7vw,68px)',lineHeight:1.02,margin:'10px 0 18px',maxWidth:920}}>Know the price before you create an account.</h1><p style={{fontSize:19,lineHeight:1.65,color:'#58685e',maxWidth:820}}>FijiLaw AI keeps public access available for free. Registration is free, while paid memberships unlock the private dashboard and persistent legal workflows. Choose a plan first, then register or sign in.</p><div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:22}}><span style={trustPill}>Free public access remains available</span><span style={trustPill}>Dashboard is a paid-member feature</span><span style={trustPill}>Prices shown in Fijian Dollars</span></div></section>
+    <section style={{background:'#173f2b',color:'#fff',borderRadius:20,padding:24,display:'grid',gridTemplateColumns:'1.2fr .8fr',gap:28,alignItems:'center',margin:'10px 0 34px'}}><div><p style={{fontSize:12,letterSpacing:'.12em',fontWeight:800,color:'#c9d9cf',margin:'0 0 8px'}}>BEFORE YOU REGISTER</p><h2 style={{fontFamily:'Georgia,serif',fontSize:32,fontWeight:500,margin:'0 0 10px'}}>Choose whether you need a free account or a paid dashboard.</h2><p style={{lineHeight:1.6,color:'#d6e1da',margin:0}}>You can create a free account without paying. If you need saved cases, document history, referrals or professional tools, choose a paid plan below.</p></div><div style={{display:'flex',gap:10,justifyContent:'flex-end',flexWrap:'wrap'}}><a href="/account?mode=register" style={lightCta}>Create Free Account</a><a href="#plans" style={outlineLight}>Compare Paid Plans</a></div></section>
+    {source==='fallback'&&<p role="status" style={{background:'#fff8e8',border:'1px solid #ead9ad',padding:'12px 14px',borderRadius:10,color:'#6d5728'}}>Live plan data is temporarily unavailable. FijiLaw AI is showing the configured pricing catalogue so you can still review membership options.</p>}
     <div style={{display:'flex',gap:8,margin:'28px 0'}}><button onClick={()=>setAnnual(false)} style={toggle(!annual)}>Monthly</button><button onClick={()=>setAnnual(true)} style={toggle(annual)}>Annual</button></div>
-
-    <section id="plans">
-      {loading&&<p style={{color:'#66746b'}}>Loading membership plans…</p>}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(250px,1fr))',gap:14}}>{ordered.map(p=>{
-        const isPopular=p.code==='firm_professional'; const price=annual?p.annualPriceFjd:p.monthlyPriceFjd;
-        return <article key={p.code} style={{background:'#fff',border:isPopular?'2px solid #173f2b':'1px solid #d5ddd7',borderRadius:18,padding:24,display:'flex',flexDirection:'column',minHeight:410,position:'relative'}}>
-          {isPopular&&<span style={{position:'absolute',right:18,top:16,fontSize:11,fontWeight:800,letterSpacing:'.08em',background:'#e7efe9',padding:'6px 8px',borderRadius:999}}>POPULAR</span>}
-          <p style={{fontSize:12,fontWeight:800,letterSpacing:'.1em',color:'#64736a',marginTop:0}}>{p.audience.toUpperCase()}</p>
-          <h2 style={{fontFamily:'Georgia,serif',fontWeight:500,fontSize:30,margin:'8px 0'}}>{p.name}</h2>
-          <p style={{fontSize:15,lineHeight:1.55,color:'#627168',minHeight:70}}>{planDescriptions[p.code]??'Membership access for FijiLaw AI.'}</p>
-          <p style={{fontSize:32,fontWeight:800,margin:'8px 0'}}>{p.monthlyPriceFjd===null?'Contact us':p.monthlyPriceFjd===0?'Free':`FJD $${price}`}</p>
-          <small style={{color:'#6b786f'}}>{p.monthlyPriceFjd&&p.monthlyPriceFjd>0?(annual?'per year':'per month'):p.code==='free'?'No payment required':'Custom agreement'}</small>
-          <ul style={{paddingLeft:18,lineHeight:1.75,color:'#536158',marginBottom:24}}>{(highlights[p.code]??p.entitlements.slice(0,6).map(x=>x.replaceAll('.',' '))).map(x=><li key={x}>{x}</li>)}</ul>
-          <a href={p.code==='free'?'/account?mode=register':p.code==='institutional'?'/account?mode=register':`/account?mode=register&plan=${encodeURIComponent(p.code)}`} style={{marginTop:'auto',background:p.isPaid?'#173f2b':'#edf1ee',color:p.isPaid?'#fff':'#173f2b',padding:'12px 14px',borderRadius:10,textAlign:'center',textDecoration:'none',fontWeight:800}}>{p.code==='free'?'Register Free':p.code==='institutional'?'Contact / Register':'Choose Plan & Register'}</a>
-        </article>})}</div>
-    </section>
-
-    <section style={{marginTop:42,padding:26,border:'1px solid #d5ddd7',borderRadius:18,background:'#f8faf8'}}>
-      <h2 style={{fontFamily:'Georgia,serif',fontWeight:500,fontSize:30,margin:'0 0 10px'}}>Important membership notes</h2>
-      <ul style={{lineHeight:1.7,color:'#59685f',paddingLeft:20,marginBottom:0}}><li>Registering an account does not automatically create a paid subscription.</li><li>Paid dashboard access is controlled by the active subscription on the server.</li><li>Annual pricing currently reflects approximately two months free compared with paying monthly for 12 months.</li><li>Sponsored placement and advertising features are clearly labelled and kept separate from FijiLaw AI legal analysis and legal recommendations.</li></ul>
-    </section>
+    <section id="plans"><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(250px,1fr))',gap:14}}>{ordered.map(p=>{const isPopular=p.code==='firm_professional';const price=annual?p.annualPriceFjd:p.monthlyPriceFjd;return <article key={p.code} style={{background:'#fff',border:isPopular?'2px solid #173f2b':'1px solid #d5ddd7',borderRadius:18,padding:24,display:'flex',flexDirection:'column',minHeight:410,position:'relative'}}>{isPopular&&<span style={{position:'absolute',right:18,top:16,fontSize:11,fontWeight:800,letterSpacing:'.08em',background:'#e7efe9',padding:'6px 8px',borderRadius:999}}>POPULAR</span>}<p style={{fontSize:12,fontWeight:800,letterSpacing:'.1em',color:'#64736a',marginTop:0}}>{p.audience.toUpperCase()}</p><h2 style={{fontFamily:'Georgia,serif',fontWeight:500,fontSize:30,margin:'8px 0'}}>{p.name}</h2><p style={{fontSize:15,lineHeight:1.55,color:'#627168',minHeight:70}}>{planDescriptions[p.code]??'Membership access for FijiLaw AI.'}</p><p style={{fontSize:32,fontWeight:800,margin:'8px 0'}}>{p.monthlyPriceFjd===null?'Contact us':p.monthlyPriceFjd===0?'Free':`FJD $${price}`}</p><small style={{color:'#6b786f'}}>{p.monthlyPriceFjd&&p.monthlyPriceFjd>0?(annual?'per year':'per month'):p.code==='free'?'No payment required':'Custom agreement'}</small><ul style={{paddingLeft:18,lineHeight:1.75,color:'#536158',marginBottom:24}}>{(highlights[p.code]??p.entitlements.slice(0,6).map(x=>x.replaceAll('.',' '))).map(x=><li key={x}>{x}</li>)}</ul><a href={p.code==='free'?'/account?mode=register':p.code==='institutional'?'/account?mode=register':`/account?mode=register&plan=${encodeURIComponent(p.code)}`} style={{marginTop:'auto',background:p.isPaid?'#173f2b':'#edf1ee',color:p.isPaid?'#fff':'#173f2b',padding:'12px 14px',borderRadius:10,textAlign:'center',textDecoration:'none',fontWeight:800}}>{p.code==='free'?'Register Free':p.code==='institutional'?'Contact / Register':'Choose Plan & Register'}</a></article>})}</div></section>
+    <section style={{marginTop:42,padding:26,border:'1px solid #d5ddd7',borderRadius:18,background:'#f8faf8'}}><h2 style={{fontFamily:'Georgia,serif',fontWeight:500,fontSize:30,margin:'0 0 10px'}}>Important membership notes</h2><ul style={{lineHeight:1.7,color:'#59685f',paddingLeft:20,marginBottom:0}}><li>Registering an account does not automatically create a paid subscription.</li><li>Paid dashboard access is controlled by the active subscription on the server.</li><li>Annual pricing currently reflects approximately two months free compared with paying monthly for 12 months.</li><li>Sponsored placement and advertising features are clearly labelled and kept separate from FijiLaw AI legal analysis and legal recommendations.</li></ul></section>
   </main>;
 }
 
