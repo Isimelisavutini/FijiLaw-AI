@@ -3,5 +3,6 @@
   <ItemGroup>
     <ProjectReference Include="../FijiLaw.Domain/FijiLaw.Domain.csproj" />
     <ProjectReference Include="../FijiLaw.AI/FijiLaw.AI.csproj" />
+    <ProjectReference Include="../FijiLaw.Infrastructure/FijiLaw.Infrastructure.csproj" />
   </ItemGroup>
 </Project>
