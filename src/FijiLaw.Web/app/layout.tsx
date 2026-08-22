@@ -1,6 +1,7 @@
 import './styles.css';
 import './resilience.css';
 import ApiResilience from './ApiResilience';
+import MembershipEntryBar from './MembershipEntryBar';
 
 export const metadata = {
   title: 'FijiLaw AI',
@@ -8,5 +9,5 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body><ApiResilience>{children}</ApiResilience></body></html>;
+  return <html lang="en"><body><ApiResilience><MembershipEntryBar />{children}</ApiResilience></body></html>;
 }
