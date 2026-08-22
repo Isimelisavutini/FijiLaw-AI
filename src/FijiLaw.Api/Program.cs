@@ -5,6 +5,8 @@ using FijiLaw.Infrastructure;
 var builder = WebApplication.CreateBuilder(args);
 
 var databaseUrl = builder.Configuration["DATABASE_URL"];
+var adminApiKey = builder.Configuration["ADMIN_API_KEY"];
+
 if (string.IsNullOrWhiteSpace(databaseUrl))
 {
     builder.Services.AddSingleton<ILegalSourceRetriever, EmptyLegalSourceRetriever>();
@@ -13,6 +15,7 @@ else
 {
     builder.Services.AddSingleton<ILegalSourceRetriever>(_ => new PostgresLegalSourceRetriever(databaseUrl));
     builder.Services.AddSingleton(_ => new DatabaseInitializer(databaseUrl));
+    builder.Services.AddSingleton(_ => new PostgresLegalSourceStore(databaseUrl));
 }
 
 builder.Services.AddSingleton<ILegalAgent, LegalAgent>();
@@ -34,7 +37,8 @@ app.MapGet("/health", () => Results.Ok(new
 {
     status = "ok",
     service = "FijiLaw.Api",
-    legalSourceStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "in-memory-fallback" : "postgresql"
+    legalSourceStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "in-memory-fallback" : "postgresql",
+    legalSourceIngestion = string.IsNullOrWhiteSpace(databaseUrl) ? "unavailable" : "available"
 }));
 
 app.MapPost("/api/legal/triage", async (LegalTriageRequest request, ILegalAgent agent, CancellationToken ct) =>
@@ -42,6 +46,33 @@ app.MapPost("/api/legal/triage", async (LegalTriageRequest request, ILegalAgent 
     try
     {
         return Results.Ok(await agent.TriageAsync(request, ct));
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/admin/legal-sources", async (
+    HttpRequest httpRequest,
+    LegalSourceInput input,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(databaseUrl))
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+
+    if (string.IsNullOrWhiteSpace(adminApiKey))
+        return Results.Problem("ADMIN_API_KEY is not configured.", statusCode: 503);
+
+    if (!httpRequest.Headers.TryGetValue("X-Admin-Key", out var suppliedKey) || suppliedKey != adminApiKey)
+        return Results.Unauthorized();
+
+    try
+    {
+        var store = httpRequest.HttpContext.RequestServices.GetRequiredService<PostgresLegalSourceStore>();
+        var correlationId = Guid.NewGuid().ToString("N");
+        var id = await store.UpsertAsync(input, correlationId, ct);
+        return Results.Ok(new { id, correlationId, input.Verified });
     }
     catch (ArgumentException ex)
     {
