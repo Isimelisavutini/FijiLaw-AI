@@ -15,12 +15,14 @@ public sealed class PostgresMembershipInitializer(string connectionString)
               display_name TEXT,
               identity_provider TEXT,
               identity_subject TEXT,
+              requested_plan_code TEXT,
               email_verified BOOLEAN NOT NULL DEFAULT FALSE,
               status TEXT NOT NULL DEFAULT 'active',
               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
               updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
               UNIQUE (identity_provider, identity_subject)
             );
+            ALTER TABLE app_users ADD COLUMN IF NOT EXISTS requested_plan_code TEXT;
 
             CREATE TABLE IF NOT EXISTS roles (
               id UUID PRIMARY KEY DEFAULT gen_random_uuid(), code TEXT NOT NULL UNIQUE, name TEXT NOT NULL, description TEXT
@@ -161,6 +163,7 @@ public sealed class PostgresMembershipInitializer(string connectionString)
             CREATE INDEX IF NOT EXISTS idx_subscriptions_user_status ON subscriptions(user_id,status);
             CREATE INDEX IF NOT EXISTS idx_subscriptions_org_status ON subscriptions(organisation_id,status);
             CREATE INDEX IF NOT EXISTS idx_usage_user_created ON usage_ledger(user_id,created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_users_requested_plan ON app_users(requested_plan_code) WHERE requested_plan_code IS NOT NULL;
             """;
 
         await using var connection = new NpgsqlConnection(connectionString);
