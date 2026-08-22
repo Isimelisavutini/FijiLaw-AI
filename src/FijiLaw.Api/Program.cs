@@ -1,4 +1,5 @@
 using FijiLaw.AI;
+using FijiLaw.Api;
 using FijiLaw.Domain;
 using FijiLaw.Infrastructure;
 
@@ -31,6 +32,7 @@ else
 }
 
 builder.Services.AddSingleton<ILegalAgent, LegalAgent>();
+builder.Services.AddSingleton<DocumentTextExtractor>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins(builder.Configuration["WebOrigin"] ?? "http://localhost:3000")
           .AllowAnyHeader().AllowAnyMethod()));
@@ -52,7 +54,8 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
     legalSourceStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "curated-official-source-fallback" : "postgresql",
     legalSourceIngestion = string.IsNullOrWhiteSpace(databaseUrl) ? "unavailable" : "available",
     aiProvider = modelProvider.Name,
-    aiEnabled = modelProvider.IsEnabled
+    aiEnabled = modelProvider.IsEnabled,
+    documentAnalysis = "pdf-docx-txt"
 }));
 
 app.MapPost("/api/legal/triage", async (LegalTriageRequest request, ILegalAgent agent, CancellationToken ct) =>
@@ -66,6 +69,39 @@ app.MapPost("/api/legal/triage", async (LegalTriageRequest request, ILegalAgent 
         return Results.BadRequest(new { error = ex.Message });
     }
 });
+
+app.MapPost("/api/legal/documents/analyse", async (
+    IFormFile file,
+    DocumentTextExtractor extractor,
+    ILegalAgent agent,
+    CancellationToken ct) =>
+{
+    try
+    {
+        var text = await extractor.ExtractAsync(file, ct);
+        var triageText = $"I uploaded a legal document named '{Path.GetFileName(file.FileName)}'. Analyse the document context and identify the likely Fiji legal area, relevant authorities, important missing information and next steps. Document text:\n{text}";
+        var assessment = await agent.TriageAsync(new LegalTriageRequest(triageText, Language: "en"), ct);
+        var preview = text.Length > 1200 ? text[..1200] + "…" : text;
+
+        return Results.Ok(new
+        {
+            fileName = Path.GetFileName(file.FileName),
+            contentType = file.ContentType,
+            characterCount = text.Length,
+            preview,
+            assessment,
+            note = "The uploaded file is processed in memory for this MVP and is not stored by this endpoint."
+        });
+    }
+    catch (ArgumentException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+    catch
+    {
+        return Results.Problem("The document could not be read safely. Check that the file is a valid PDF, DOCX or TXT document.", statusCode: 400);
+    }
+}).DisableAntiforgery();
 
 app.MapPost("/api/admin/legal-sources", async (
     HttpRequest httpRequest,
