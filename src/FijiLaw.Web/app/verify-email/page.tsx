@@ -22,6 +22,8 @@ export default function VerifyEmailPage(){
     finally{setLoading(false);}
   }
 
+  const actionDisabled=loading||!token.trim();
+
   return <main style={{maxWidth:720,margin:'0 auto',padding:'64px 24px',fontFamily:'Inter,system-ui,sans-serif',color:'#16231c'}}>
     <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'center'}}><a href="/" style={{color:'#173f2b',fontWeight:800,textDecoration:'none'}}>FijiLaw AI</a><a href="/account?mode=login" style={{color:'#173f2b',fontWeight:800,textDecoration:'none'}}>Sign In</a></div>
     <p style={{letterSpacing:'.14em',fontSize:12,fontWeight:800,color:'#587063',marginTop:48}}>EMAIL VERIFICATION</p>
@@ -31,7 +33,7 @@ export default function VerifyEmailPage(){
       <label style={{display:'block',fontWeight:700,marginBottom:8}}>Verification token</label>
       <input required value={token} onChange={e=>setToken(e.target.value)} placeholder="Paste verification token" autoComplete="one-time-code" style={{width:'100%',padding:'13px 14px',border:'1px solid #bdc8c0',borderRadius:10,fontSize:16,boxSizing:'border-box',marginBottom:14}}/>
       {message&&<p role={success?'status':'alert'} style={{background:success?'#edf8f1':'#fff0f0',padding:12,borderRadius:8,lineHeight:1.5}}>{message}</p>}
-      <button disabled={loading||!token.trim()} style={{width:'100%',border:0,borderRadius:10,padding:14,background:'#173f2b',color:'#fff',fontWeight:800,cursor:loading||!token.trim()?'not-allowed':'pointer',opacity:loading||!token.trim()?.58:1}}>{loading?'Verifying…':'Verify email'}</button>
+      <button disabled={actionDisabled} style={{width:'100%',border:0,borderRadius:10,padding:14,background:'#173f2b',color:'#fff',fontWeight:800,cursor:actionDisabled?'not-allowed':'pointer',opacity:actionDisabled?0.58:1}}>{loading?'Verifying…':'Verify email'}</button>
     </form>
     {success&&<p style={{marginTop:20}}><a href="/dashboard" style={{color:'#173f2b',fontWeight:800}}>Continue to dashboard →</a></p>}
   </main>;
