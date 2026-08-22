@@ -6,6 +6,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 var databaseUrl = builder.Configuration["DATABASE_URL"];
 var adminApiKey = builder.Configuration["ADMIN_API_KEY"];
+var openAiApiKey = builder.Configuration["OPENAI_API_KEY"];
+var openAiModel = builder.Configuration["OPENAI_MODEL"] ?? "gpt-5.6-luna";
 
 if (string.IsNullOrWhiteSpace(databaseUrl))
 {
@@ -16,6 +18,16 @@ else
     builder.Services.AddSingleton<ILegalSourceRetriever>(_ => new PostgresLegalSourceRetriever(databaseUrl));
     builder.Services.AddSingleton(_ => new DatabaseInitializer(databaseUrl));
     builder.Services.AddSingleton(_ => new PostgresLegalSourceStore(databaseUrl));
+}
+
+if (string.IsNullOrWhiteSpace(openAiApiKey))
+{
+    builder.Services.AddSingleton<ILanguageModelProvider, DisabledLanguageModelProvider>();
+}
+else
+{
+    builder.Services.AddSingleton<ILanguageModelProvider>(_ =>
+        new OpenAIResponsesProvider(new HttpClient { Timeout = TimeSpan.FromSeconds(45) }, openAiApiKey, openAiModel));
 }
 
 builder.Services.AddSingleton<ILegalAgent, LegalAgent>();
@@ -33,12 +45,14 @@ if (!string.IsNullOrWhiteSpace(databaseUrl))
     await initializer.EnsureCreatedAsync();
 }
 
-app.MapGet("/health", () => Results.Ok(new
+app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
 {
     status = "ok",
     service = "FijiLaw.Api",
     legalSourceStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "in-memory-fallback" : "postgresql",
-    legalSourceIngestion = string.IsNullOrWhiteSpace(databaseUrl) ? "unavailable" : "available"
+    legalSourceIngestion = string.IsNullOrWhiteSpace(databaseUrl) ? "unavailable" : "available",
+    aiProvider = modelProvider.Name,
+    aiEnabled = modelProvider.IsEnabled
 }));
 
 app.MapPost("/api/legal/triage", async (LegalTriageRequest request, ILegalAgent agent, CancellationToken ct) =>
