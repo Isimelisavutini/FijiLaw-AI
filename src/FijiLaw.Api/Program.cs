@@ -33,6 +33,7 @@ else
 
 builder.Services.AddSingleton<ILegalAgent, LegalAgent>();
 builder.Services.AddSingleton<DocumentTextExtractor>();
+builder.Services.AddSingleton<LegalServicesDirectory>();
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
     policy.WithOrigins(builder.Configuration["WebOrigin"] ?? "http://localhost:3000")
           .AllowAnyHeader().AllowAnyMethod()));
@@ -55,8 +56,12 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
     legalSourceIngestion = string.IsNullOrWhiteSpace(databaseUrl) ? "unavailable" : "available",
     aiProvider = modelProvider.Name,
     aiEnabled = modelProvider.IsEnabled,
-    documentAnalysis = "pdf-docx-txt"
+    documentAnalysis = "pdf-docx-txt",
+    legalServicesDirectory = "available"
 }));
+
+app.MapGet("/api/legal-services", (string? city, string? type, string? area, string? q, LegalServicesDirectory directory) =>
+    Results.Ok(new { items = directory.Search(city, type, area, q), cities = directory.Cities() }));
 
 app.MapPost("/api/legal/triage", async (LegalTriageRequest request, ILegalAgent agent, CancellationToken ct) =>
 {
