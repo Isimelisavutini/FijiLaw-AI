@@ -1,4 +1,6 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'https://fijilaw-api-production-production.up.railway.app';
+const configuredApiBase = process.env.NEXT_PUBLIC_API_URL?.trim();
+
+export const API_BASE = (configuredApiBase || 'https://fijilaw-api-production-production.up.railway.app').replace(/\/+$/, '');
 
 export const SERVICE_UNAVAILABLE_MESSAGE =
   'FijiLaw AI is temporarily unable to reach the legal service. Your information has not been submitted. Please try again shortly.';
