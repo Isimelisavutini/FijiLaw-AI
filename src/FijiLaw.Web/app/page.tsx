@@ -1,12 +1,17 @@
 'use client';
 
-import { FormEvent, useState } from 'react';
+import { ChangeEvent, FormEvent, useState } from 'react';
 
 type Result = {
   issue: string; facts: string[]; missingInformation: string[];
   authorities: { title: string; provision?: string; sourceUrl?: string }[];
   guidance: string; nextSteps: string[]; riskLevel: string | number;
   humanReviewRequired: boolean; disclaimer: string; correlationId: string;
+};
+
+type DocumentResult = {
+  fileName: string; contentType?: string; characterCount: number; preview: string;
+  assessment: Result; note: string;
 };
 
 const legalAreas = [
@@ -17,7 +22,7 @@ const legalAreas = [
 
 const entryPaths = [
   ['Tell Me My Rights', 'Describe a situation and receive an initial legal assessment.', 'Start assessment', '#triage'],
-  ['Upload a Legal Document', 'Understand a letter, contract, notice or other legal document.', 'Coming next', '#services'],
+  ['Upload a Legal Document', 'Understand a letter, contract, notice or other legal document.', 'Analyse document', '#document-upload'],
   ['Find a Lawyer', 'Search for an appropriate legal practitioner by area of law and location.', 'Directory planned', '#services'],
   ['Find Legal Aid', 'Identify public and community legal assistance options.', 'Access pathway', '#services'],
   ['Nearest Legal Office', 'Find an appropriate legal office based on your location and matter.', 'Map planned', '#services'],
@@ -29,18 +34,47 @@ function riskLabel(value: string | number) {
   if (value === '0') return 'Low'; return value;
 }
 
+function Assessment({ result, title = 'Initial assessment' }: { result: Result; title?: string }) {
+  return <section className="result">
+    <div className="resultHead"><div><p className="eyebrow">{title.toUpperCase()}</p><h2>{result.issue}</h2></div><span className="risk">{riskLabel(result.riskLevel)} risk</span></div>
+    {result.humanReviewRequired && <div className="warning"><strong>Human legal review recommended.</strong> This matter should not rely on AI alone.</div>}
+    <h3>Guidance</h3><p>{result.guidance}</p>
+    <h3>Information still needed</h3><ul>{result.missingInformation.map(x => <li key={x}>{x}</li>)}</ul>
+    <h3>Next steps</h3><ol>{result.nextSteps.map(x => <li key={x}>{x}</li>)}</ol>
+    <h3>Verified authorities</h3>{result.authorities.length ? <ul className="authorityList">{result.authorities.map((a, i) => <li key={`${a.title}-${a.provision}-${i}`}><strong>{a.title}</strong>{a.provision ? ` — ${a.provision}` : ''}{a.sourceUrl ? <a href={a.sourceUrl} target="_blank" rel="noreferrer">View official source ↗</a> : null}</li>)}</ul> : <p>No verified legal authorities are connected yet. The system intentionally does not invent citations.</p>}
+    <p className="disclaimer">{result.disclaimer}<br />Reference: {result.correlationId}</p>
+  </section>;
+}
+
 export default function Home() {
   const [situation, setSituation] = useState(''); const [result, setResult] = useState<Result | null>(null);
   const [loading, setLoading] = useState(false); const [error, setError] = useState('');
+  const [documentFile, setDocumentFile] = useState<File | null>(null); const [documentResult, setDocumentResult] = useState<DocumentResult | null>(null);
+  const [documentLoading, setDocumentLoading] = useState(false); const [documentError, setDocumentError] = useState('');
+  const apiBase = process.env.NEXT_PUBLIC_API_URL ?? 'https://fijilaw-api-production-production.up.railway.app';
 
   async function submit(e: FormEvent) {
     e.preventDefault(); setLoading(true); setError(''); setResult(null);
     try {
-      const base = process.env.NEXT_PUBLIC_API_URL ?? 'https://fijilaw-api-production-production.up.railway.app';
-      const response = await fetch(`${base}/api/legal/triage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ situation, language: 'en' }) });
-      if (!response.ok) throw new Error('The legal triage service could not process this request.');
-      setResult(await response.json());
+      const response = await fetch(`${apiBase}/api/legal/triage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ situation, language: 'en' }) });
+      if (!response.ok) throw new Error('The legal triage service could not process this request.'); setResult(await response.json());
     } catch (e) { setError(e instanceof Error ? e.message : 'Unexpected error'); } finally { setLoading(false); }
+  }
+
+  function chooseDocument(e: ChangeEvent<HTMLInputElement>) {
+    setDocumentError(''); setDocumentResult(null); setDocumentFile(e.target.files?.[0] ?? null);
+  }
+
+  async function analyseDocument(e: FormEvent) {
+    e.preventDefault(); if (!documentFile) return;
+    setDocumentLoading(true); setDocumentError(''); setDocumentResult(null);
+    try {
+      const form = new FormData(); form.append('file', documentFile);
+      const response = await fetch(`${apiBase}/api/legal/documents/analyse`, { method: 'POST', body: form });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? body.detail ?? 'The document could not be analysed.');
+      setDocumentResult(body);
+    } catch (e) { setDocumentError(e instanceof Error ? e.message : 'Unexpected error'); } finally { setDocumentLoading(false); }
   }
 
   return <main className="siteShell">
@@ -48,14 +82,16 @@ export default function Home() {
 
     <section className="hero" id="top"><div className="heroCopy"><p className="eyebrow">ACCESS TO JUSTICE · FIJI</p><h1>Understand your rights. Know your next step.</h1><p className="lead">FijiLaw AI helps you organize a legal problem, find relevant Fiji law, understand what information matters, and know when a qualified lawyer should review your case.</p><div className="heroActions"><a className="primaryCta" href="#triage">Tell me what happened</a><a className="secondaryCta" href="#services">Explore legal help</a></div><div className="trustStrip"><span>Verified Fiji-law sources</span><span>Human review for high-risk matters</span><span>English · iTaukei · Fiji Hindi</span></div></div><aside className="heroCard"><span className="cardKicker">AI LEGAL TRIAGE</span><h2>Start with your story.</h2><p>You do not need to know the name of an Act or legal term. Describe the situation in your own words.</p><div className="miniFlow"><span>1</span><p>Explain what happened</p></div><div className="miniFlow"><span>2</span><p>FijiLaw identifies the legal area</p></div><div className="miniFlow"><span>3</span><p>Review verified authorities and next steps</p></div></aside></section>
 
-    <section className="serviceSection" id="services"><div className="sectionHeading"><div><p className="eyebrow">HOW CAN WE HELP?</p><h2>Choose the way you want to start.</h2></div><p>FijiLaw AI is being designed as a complete legal-access gateway—from understanding a problem to finding professional assistance and managing a case.</p></div><div className="serviceGrid">{entryPaths.map(([title, desc, action, href], index) => <a className={`serviceCard ${index === 0 ? 'featuredService' : ''}`} href={href} key={title}><span className="serviceNumber">0{index + 1}</span><div><h3>{title}</h3><p>{desc}</p></div><span className="serviceAction">{action} →</span></a>)}</div></section>
+    <section className="serviceSection" id="services"><div className="sectionHeading"><div><p className="eyebrow">HOW CAN WE HELP?</p><h2>Choose the way you want to start.</h2></div><p>FijiLaw AI is being designed as a complete legal-access gateway—from understanding a problem to finding professional assistance and managing a case.</p></div><div className="serviceGrid">{entryPaths.map(([title, desc, action, href], index) => <a className={`serviceCard ${index === 0 ? 'featuredService' : index === 1 ? 'activeService' : ''}`} href={href} key={title}><span className="serviceNumber">0{index + 1}</span><div><h3>{title}</h3><p>{desc}</p></div><span className="serviceAction">{action} →</span></a>)}</div></section>
+
+    <section className="documentSection" id="document-upload"><div className="documentIntro"><p className="eyebrow">DOCUMENT ANALYSIS</p><h2>Upload a legal document.</h2><p>Use FijiLaw AI to extract readable text, identify the likely legal area, retrieve relevant Fiji authorities, and explain what information or next steps may matter.</p><div className="documentMeta"><span>PDF</span><span>DOCX</span><span>TXT</span><span>Maximum 8 MB</span></div></div><div className="uploadPanel"><form onSubmit={analyseDocument}><label className="uploadBox" htmlFor="legal-document"><span className="uploadIcon">↑</span><strong>{documentFile ? documentFile.name : 'Choose a legal document'}</strong><small>{documentFile ? `${Math.ceil(documentFile.size / 1024)} KB selected` : 'PDF, DOCX or TXT · Up to 8 MB'}</small><input id="legal-document" type="file" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" onChange={chooseDocument} /></label><div className="row"><small>The MVP processes the uploaded file in memory and does not store it through this endpoint. Scanned image-only PDFs are not yet supported.</small><button className="submitButton" disabled={!documentFile || documentLoading}>{documentLoading ? 'Analysing…' : 'Analyse document'}</button></div></form></div></section>
+    {documentError && <p className="error">{documentError}</p>}
+    {documentResult && <section className="documentOutput"><div className="documentSummary"><p className="eyebrow">DOCUMENT READ</p><h2>{documentResult.fileName}</h2><p>{documentResult.characterCount.toLocaleString()} readable characters extracted.</p><details><summary>Preview extracted text</summary><pre>{documentResult.preview}</pre></details><small>{documentResult.note}</small></div><Assessment result={documentResult.assessment} title="Document assessment" /></section>}
 
     <section className="section" id="legal-help"><div className="sectionHeading"><div><p className="eyebrow">LEGAL AREAS</p><h2>Common areas FijiLaw AI can help you navigate.</h2></div><p>Start with a category or simply describe your situation. The system will classify the matter and retrieve relevant Fiji legal sources.</p></div><div className="categoryGrid">{legalAreas.map(([title, desc]) => <button type="button" className="categoryCard" key={title} onClick={() => { setSituation(`I need help with ${title}. `); document.getElementById('triage')?.scrollIntoView({ behavior: 'smooth' }); }}><span className="categoryArrow">↗</span><strong>{title}</strong><small>{desc}</small></button>)}</div></section>
 
     <section className="triageSection" id="triage"><div className="triageIntro"><p className="eyebrow">TELL ME MY RIGHTS</p><h2>What happened?</h2><p>Describe the important facts in plain language. Include dates, what happened, who was involved, and what outcome you are seeking where possible.</p></div><section className="panel"><form onSubmit={submit}><label htmlFor="situation">Your legal situation</label><textarea id="situation" required minLength={10} value={situation} onChange={e => setSituation(e.target.value)} placeholder="Example: My employer terminated me yesterday without giving me a written reason..." /><div className="row"><small>Do not include passwords, banking PINs, or unnecessary sensitive information.</small><button className="submitButton" disabled={loading}>{loading ? 'Assessing…' : 'Start legal triage'}</button></div></form></section></section>
-
-    {error && <p className="error">{error}</p>}
-    {result && <section className="result"><div className="resultHead"><div><p className="eyebrow">INITIAL ASSESSMENT</p><h2>{result.issue}</h2></div><span className="risk">{riskLabel(result.riskLevel)} risk</span></div>{result.humanReviewRequired && <div className="warning"><strong>Human legal review recommended.</strong> This matter should not rely on AI alone.</div>}<h3>Guidance</h3><p>{result.guidance}</p><h3>Information still needed</h3><ul>{result.missingInformation.map(x => <li key={x}>{x}</li>)}</ul><h3>Next steps</h3><ol>{result.nextSteps.map(x => <li key={x}>{x}</li>)}</ol><h3>Verified authorities</h3>{result.authorities.length ? <ul className="authorityList">{result.authorities.map((a, i) => <li key={`${a.title}-${a.provision}-${i}`}><strong>{a.title}</strong>{a.provision ? ` — ${a.provision}` : ''}{a.sourceUrl ? <a href={a.sourceUrl} target="_blank" rel="noreferrer">View official source ↗</a> : null}</li>)}</ul> : <p>No verified legal authorities are connected yet. The system intentionally does not invent citations.</p>}<p className="disclaimer">{result.disclaimer}<br />Reference: {result.correlationId}</p></section>}
+    {error && <p className="error">{error}</p>}{result && <Assessment result={result} />}
 
     <section className="section howSection" id="how-it-works"><div className="sectionHeading"><div><p className="eyebrow">HOW IT WORKS</p><h2>Legal guidance with controlled AI.</h2></div><p>FijiLaw AI is designed to retrieve law first, reason second, and escalate when a matter requires professional review.</p></div><div className="stepsGrid"><article><span>01</span><h3>Understand the facts</h3><p>The system organizes your description into legal issues, parties, dates, evidence and missing information.</p></article><article><span>02</span><h3>Retrieve Fiji law</h3><p>Relevant Acts and provisions are matched from a curated and progressively expanding Fiji legal knowledge base.</p></article><article><span>03</span><h3>Assess the next step</h3><p>You receive a structured assessment, verified authorities and a clear indication when human legal review is required.</p></article></div></section>
 
