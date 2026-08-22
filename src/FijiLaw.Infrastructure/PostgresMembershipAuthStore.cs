@@ -8,6 +8,7 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
 {
     private const int Iterations = 210_000;
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
+    private static readonly TimeSpan PasswordResetLifetime = TimeSpan.FromMinutes(30);
     private static readonly HashSet<string> AllowedRequestedPlans = new(StringComparer.OrdinalIgnoreCase)
     {
         MembershipPlans.Free,
@@ -40,8 +41,18 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
 
+            CREATE TABLE IF NOT EXISTS password_reset_tokens (
+              id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+              user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+              token_hash TEXT NOT NULL UNIQUE,
+              expires_at TIMESTAMPTZ NOT NULL,
+              consumed_at TIMESTAMPTZ,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+
             CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id, expires_at DESC);
             CREATE INDEX IF NOT EXISTS idx_auth_sessions_token ON auth_sessions(token_hash);
+            CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id, expires_at DESC);
             """;
 
         await using var connection = new NpgsqlConnection(connectionString);
@@ -150,6 +161,97 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
         var session = await CreateSessionAsync(connection, transaction, userId, email, displayName, ct);
         await transaction.CommitAsync(ct);
         return session;
+    }
+
+    public async Task<(Guid UserId, string Email, string Token)?> CreatePasswordResetTokenAsync(string email, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(email) || !email.Contains('@')) return null;
+        var normalized = email.Trim().ToLowerInvariant();
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+
+        const string findSql = "SELECT id,email FROM app_users WHERE email=@email AND status='active' LIMIT 1;";
+        await using var find = new NpgsqlCommand(findSql, connection, transaction);
+        find.Parameters.AddWithValue("email", normalized);
+        await using var reader = await find.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+        var userId = reader.GetGuid(0);
+        var resolvedEmail = reader.GetString(1);
+        await reader.DisposeAsync();
+
+        const string revokeSql = "UPDATE password_reset_tokens SET consumed_at=NOW() WHERE user_id=@userId AND consumed_at IS NULL;";
+        await using (var revoke = new NpgsqlCommand(revokeSql, connection, transaction))
+        {
+            revoke.Parameters.AddWithValue("userId", userId);
+            await revoke.ExecuteNonQueryAsync(ct);
+        }
+
+        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+        const string insertSql = "INSERT INTO password_reset_tokens (user_id,token_hash,expires_at) VALUES (@userId,@hash,@expiresAt);";
+        await using (var insert = new NpgsqlCommand(insertSql, connection, transaction))
+        {
+            insert.Parameters.AddWithValue("userId", userId);
+            insert.Parameters.AddWithValue("hash", HashToken(token));
+            insert.Parameters.AddWithValue("expiresAt", DateTimeOffset.UtcNow.Add(PasswordResetLifetime));
+            await insert.ExecuteNonQueryAsync(ct);
+        }
+
+        await transaction.CommitAsync(ct);
+        return (userId, resolvedEmail, token);
+    }
+
+    public async Task<Guid?> ResetPasswordAsync(string token, string newPassword, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(token)) return null;
+        ValidatePassword(newPassword);
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+
+        const string tokenSql = """
+            SELECT user_id FROM password_reset_tokens
+            WHERE token_hash=@hash AND consumed_at IS NULL AND expires_at>NOW()
+            FOR UPDATE;
+            """;
+        await using var find = new NpgsqlCommand(tokenSql, connection, transaction);
+        find.Parameters.AddWithValue("hash", HashToken(token));
+        var value = await find.ExecuteScalarAsync(ct);
+        if (value is not Guid userId) return null;
+
+        var salt = RandomNumberGenerator.GetBytes(32);
+        var hash = HashPassword(newPassword, salt, Iterations);
+        const string updateSql = """
+            UPDATE user_credentials
+            SET password_salt=@salt,password_hash=@passwordHash,iterations=@iterations,updated_at=NOW()
+            WHERE user_id=@userId;
+            """;
+        await using (var update = new NpgsqlCommand(updateSql, connection, transaction))
+        {
+            update.Parameters.AddWithValue("salt", salt);
+            update.Parameters.AddWithValue("passwordHash", hash);
+            update.Parameters.AddWithValue("iterations", Iterations);
+            update.Parameters.AddWithValue("userId", userId);
+            if (await update.ExecuteNonQueryAsync(ct) != 1) return null;
+        }
+
+        const string consumeSql = "UPDATE password_reset_tokens SET consumed_at=NOW() WHERE user_id=@userId AND consumed_at IS NULL;";
+        await using (var consume = new NpgsqlCommand(consumeSql, connection, transaction))
+        {
+            consume.Parameters.AddWithValue("userId", userId);
+            await consume.ExecuteNonQueryAsync(ct);
+        }
+
+        const string revokeSessionsSql = "UPDATE auth_sessions SET revoked_at=NOW() WHERE user_id=@userId AND revoked_at IS NULL;";
+        await using (var revoke = new NpgsqlCommand(revokeSessionsSql, connection, transaction))
+        {
+            revoke.Parameters.AddWithValue("userId", userId);
+            await revoke.ExecuteNonQueryAsync(ct);
+        }
+
+        await transaction.CommitAsync(ct);
+        return userId;
     }
 
     public async Task<Guid?> ValidateSessionAsync(string? bearerToken, CancellationToken ct = default)
