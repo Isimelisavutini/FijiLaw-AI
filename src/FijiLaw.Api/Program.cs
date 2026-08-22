@@ -30,6 +30,7 @@ else
     builder.Services.AddSingleton(_ => new PostgresLegalSourceStore(databaseUrl));
     builder.Services.AddSingleton(_ => new PostgresMembershipInitializer(databaseUrl));
     builder.Services.AddSingleton(_ => new PostgresMembershipRepository(databaseUrl));
+    builder.Services.AddSingleton(_ => new PostgresMembershipAuthStore(databaseUrl));
 }
 
 if (string.IsNullOrWhiteSpace(openAiApiKey))
@@ -58,6 +59,7 @@ if (!string.IsNullOrWhiteSpace(databaseUrl))
     using var scope = app.Services.CreateScope();
     await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresMembershipInitializer>().EnsureCreatedAsync();
+    await scope.ServiceProvider.GetRequiredService<PostgresMembershipAuthStore>().EnsureCreatedAsync();
 }
 
 app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
@@ -67,6 +69,7 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider) => Results.Ok(new
     legalSourceStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "curated-official-source-fallback" : "postgresql",
     legalSourceIngestion = string.IsNullOrWhiteSpace(databaseUrl) ? "unavailable" : "available",
     membershipStorage = string.IsNullOrWhiteSpace(databaseUrl) ? "configuration-fallback" : "postgresql",
+    membershipAuth = string.IsNullOrWhiteSpace(databaseUrl) ? "awaiting-postgresql" : "available",
     aiProvider = modelProvider.Name,
     aiEnabled = modelProvider.IsEnabled,
     documentAnalysis = "pdf-docx-txt",
@@ -94,6 +97,8 @@ app.MapGet("/api/membership/plans", async (HttpContext context, CancellationToke
     };
     return Results.Ok(new { items = fallback, source = "configuration-fallback" });
 });
+
+app.MapMembershipEndpoints(databaseUrl);
 
 app.MapGet("/api/legal-services", (string? city, string? type, string? area, string? q, LegalServicesDirectory directory) =>
     Results.Ok(new { items = directory.Search(city, type, area, q), cities = directory.Cities() }));
