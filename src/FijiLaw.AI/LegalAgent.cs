@@ -18,8 +18,9 @@ public sealed class EmptyLegalSourceRetriever : ILegalSourceRetriever
         Task.FromResult<IReadOnlyList<LegalAuthority>>(Array.Empty<LegalAuthority>());
 }
 
-public sealed class LegalAgent(ILegalSourceRetriever sources) : ILegalAgent
+public sealed class LegalAgent(ILegalSourceRetriever sources, ILanguageModelProvider? model = null) : ILegalAgent
 {
+    private readonly ILanguageModelProvider _model = model ?? new DisabledLanguageModelProvider();
     private const string Disclaimer = "FijiLaw AI provides legal information and triage, not autonomous legal representation. Important or time-sensitive matters should be reviewed by a qualified Fiji legal practitioner.";
 
     public async Task<LegalTriageResult> TriageAsync(LegalTriageRequest request, CancellationToken ct = default)
@@ -33,15 +34,25 @@ public sealed class LegalAgent(ILegalSourceRetriever sources) : ILegalAgent
         var risk = Risk(lower);
         var authorities = await sources.SearchAsync(text, ct);
         var verified = authorities.Where(a => a.Verified).ToArray();
+        var missing = MissingInfo(issue);
 
-        var guidance = verified.Length == 0
-            ? "I can help organize the issue and next steps, but no verified Fiji legal authority is currently connected to this MVP. I will not invent legislation, sections, or cases."
+        var fallbackGuidance = verified.Length == 0
+            ? "I can help organize the issue and next steps, but no verified Fiji legal authority is currently connected to this request. I will not invent legislation, sections, or cases."
             : "Relevant verified sources were retrieved. Review the cited authorities and obtain human legal review where indicated.";
+
+        var modelAuthorities = verified
+            .Select(a => $"{a.Title}{(string.IsNullOrWhiteSpace(a.Provision) ? "" : $" — {a.Provision}")}{(string.IsNullOrWhiteSpace(a.SourceUrl) ? "" : $" — {a.SourceUrl}")}")
+            .ToArray();
+
+        var modelGuidance = await _model.GenerateGuidanceAsync(
+            new LegalModelRequest(text, issue, risk.ToString(), modelAuthorities, missing), ct);
+
+        var guidance = string.IsNullOrWhiteSpace(modelGuidance) ? fallbackGuidance : modelGuidance;
 
         return new LegalTriageResult(
             issue,
             new[] { text },
-            MissingInfo(issue),
+            missing,
             verified,
             guidance,
             NextSteps(issue, risk),
