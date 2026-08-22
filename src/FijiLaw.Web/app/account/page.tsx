@@ -31,18 +31,23 @@ export default function AccountPage() {
     }catch{setMembershipHealth('unavailable');}
   }
 
-  async function requestVerification(targetEmail:string){
+  async function requestVerification(){
     if(membershipHealth!=='ready'){
       setMessage('Email verification is unavailable until the secure membership database is connected.');
       return;
     }
+    const token=sessionStorage.getItem('fijilaw_access_token');
+    if(!token){setMessage('Please sign in again before requesting a verification email.');return;}
     try{
-      const response=await fetchWithTimeout(`${API_BASE}/api/auth/request-email-verification`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:targetEmail})},12000);
+      const response=await fetchWithTimeout(`${API_BASE}/api/auth/request-email-verification`,{method:'POST',headers:{Authorization:`Bearer ${token}`}},12000);
+      if(response.status===401){setMessage('Your sign-in session has expired. Please sign in again.');return;}
       if(!response.ok) throw new Error(await readApiError(response,'Verification request could not be created.'));
       const body=await response.json().catch(()=>({}));
+      if(body.alreadyVerified){setMessage('Your email is already verified. You can continue to the dashboard.');return;}
+      if(body.deliveryAccepted){setMessage('Verification email accepted for delivery. Check your inbox and follow the verification link.');return;}
       setMessage(body.deliveryConfigured===false
-        ? 'Your account was created. Email verification is prepared, but outbound verification email delivery is not enabled yet. Paid dashboard access will remain locked until your email is verified.'
-        : 'Verification email sent. Check your inbox and follow the verification link.');
+        ? 'Your account is ready, but outbound verification email delivery is not configured yet. Paid dashboard access remains locked until email delivery is enabled and your address is verified.'
+        : 'A verification request was created, but the email provider did not accept the message. Please try again later.');
     }catch(e){setMessage(e instanceof Error?e.message:SERVICE_UNAVAILABLE_MESSAGE);}
   }
 
@@ -67,7 +72,7 @@ export default function AccountPage() {
       if(selectedPlan) sessionStorage.setItem('fijilaw_selected_plan',selectedPlan);
       if(mode==='register'){
         setRegistered(true);
-        await requestVerification(body.email);
+        await requestVerification();
       }else{
         window.location.href='/dashboard';
       }
@@ -94,7 +99,7 @@ export default function AccountPage() {
       <p style={{lineHeight:1.7,color:'#53635a'}}>{message}</p>
       {selectedPlan&&<p style={{lineHeight:1.6,color:'#53635a'}}>Your selected plan is <strong>{selectedPlan.replaceAll('_',' ')}</strong>. This preference has been recorded, but subscription activation occurs only after a completed payment flow.</p>}
       <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:20}}>
-        <button onClick={()=>void requestVerification(email)} style={{...primary,width:'auto'}}>Request verification again</button>
+        <button onClick={()=>void requestVerification()} style={{...primary,width:'auto'}}>Request verification again</button>
         <a href="/dashboard" style={linkButton}>Continue to dashboard</a>
         <a href="/pricing" style={linkButton}>View membership plans</a>
       </div>
