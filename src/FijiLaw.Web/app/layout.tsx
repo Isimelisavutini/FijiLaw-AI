@@ -1,3 +1,4 @@
+import { ClerkProvider } from '@clerk/nextjs';
 import './styles.css';
 import './resilience.css';
 import './membership.css';
@@ -10,5 +11,8 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body><ApiResilience><MembershipEntryBar />{children}</ApiResilience></body></html>;
+  const app = <ApiResilience><MembershipEntryBar />{children}</ApiResilience>;
+  const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
+  return <html lang="en"><body>{clerkEnabled ? <ClerkProvider>{app}</ClerkProvider> : app}</body></html>;
 }
