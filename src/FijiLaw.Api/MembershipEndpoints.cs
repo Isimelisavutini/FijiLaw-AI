@@ -10,7 +10,13 @@ public static class MembershipEndpoints
     {
         app.MapPost("/api/auth/register", async (RegisterRequest request, HttpContext context, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Membership registration is not available until PostgreSQL is connected.", statusCode: 503);
+            if (string.IsNullOrWhiteSpace(databaseUrl))
+            {
+                var demo = context.RequestServices.GetRequiredService<DemoMembershipAuthStore>();
+                return demo.IsEnabled
+                    ? Results.Problem("Registration is disabled while FijiLaw AI is running controlled demo access. Use an administrator-provided demo account. Persistent registration will be enabled when PostgreSQL is connected.", statusCode: 503)
+                    : Results.Problem("Membership registration is not available until PostgreSQL is connected.", statusCode: 503);
+            }
             try
             {
                 var store = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
@@ -24,9 +30,15 @@ public static class MembershipEndpoints
 
         app.MapPost("/api/auth/login", async (LoginRequest request, HttpContext context, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Member sign-in is not available until PostgreSQL is connected.", statusCode: 503);
             try
             {
+                if (string.IsNullOrWhiteSpace(databaseUrl))
+                {
+                    var demo = context.RequestServices.GetRequiredService<DemoMembershipAuthStore>();
+                    if (!demo.IsEnabled) return Results.Problem("Member sign-in is not available until PostgreSQL is connected.", statusCode: 503);
+                    return Results.Ok(demo.Login(request));
+                }
+
                 var store = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
                 var result = await store.LoginAsync(request, ct);
                 var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
@@ -39,7 +51,13 @@ public static class MembershipEndpoints
 
         app.MapPost("/api/auth/forgot-password", async (ForgotPasswordRequest request, HttpContext context, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Password recovery is not available until PostgreSQL is connected.", statusCode: 503);
+            if (string.IsNullOrWhiteSpace(databaseUrl))
+            {
+                var demo = context.RequestServices.GetRequiredService<DemoMembershipAuthStore>();
+                return demo.IsEnabled
+                    ? Results.Accepted(value: new { message = "Password recovery is disabled for temporary demo accounts. Contact the FijiLaw administrator for demo credentials.", deliveryConfigured = false, demo = true })
+                    : Results.Problem("Password recovery is not available until PostgreSQL is connected.", statusCode: 503);
+            }
             var auth = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
             var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
             var emailSender = context.RequestServices.GetRequiredService<ResendEmailSender>();
@@ -63,7 +81,7 @@ public static class MembershipEndpoints
 
         app.MapPost("/api/auth/reset-password", async (ResetPasswordRequest request, HttpContext context, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Password recovery is not available until PostgreSQL is connected.", statusCode: 503);
+            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Password reset is unavailable for temporary demo accounts.", statusCode: 503);
             try
             {
                 var auth = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
@@ -78,9 +96,14 @@ public static class MembershipEndpoints
 
         app.MapPost("/api/auth/logout", async (HttpRequest request, HttpContext context, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.NoContent();
+            var token = GetBearerToken(request);
+            if (string.IsNullOrWhiteSpace(databaseUrl))
+            {
+                context.RequestServices.GetRequiredService<DemoMembershipAuthStore>().Revoke(token);
+                return Results.NoContent();
+            }
             var store = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
-            await store.RevokeSessionAsync(GetBearerToken(request), ct);
+            await store.RevokeSessionAsync(token, ct);
             return Results.NoContent();
         });
 
@@ -89,6 +112,7 @@ public static class MembershipEndpoints
             var member = await ResolveMemberAsync(request, context, databaseUrl, ct);
             if (member is null) return Results.Unauthorized();
             if (member.EmailVerified) return Results.Ok(new { message = "Email is already verified.", deliveryConfigured = true, deliveryAccepted = true, alreadyVerified = true });
+            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Email verification is not required for controlled demo accounts.", statusCode: 503);
 
             var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
             var emailSender = context.RequestServices.GetRequiredService<ResendEmailSender>();
@@ -115,7 +139,7 @@ public static class MembershipEndpoints
 
         app.MapPost("/api/auth/verify-email", async (EmailVerificationConfirmRequest request, HttpContext context, CancellationToken ct) =>
         {
-            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Email verification is not available until PostgreSQL is connected.", statusCode: 503);
+            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Email verification is not required for controlled demo accounts.", statusCode: 503);
             var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
             var userId = await security.VerifyEmailAsync(request.Token, ct);
             return userId is null ? Results.BadRequest(new { error = "The verification token is invalid or expired." }) : Results.Ok(new { verified = true });
@@ -151,8 +175,8 @@ public static class MembershipEndpoints
         {
             var actor = await ResolveMemberAsync(request, context, databaseUrl, ct);
             if (actor is null) return Results.Unauthorized();
-            if (!actor.Roles.Contains(MembershipRoles.PlatformAdmin, StringComparer.OrdinalIgnoreCase))
-                return Results.Forbid();
+            if (!actor.Roles.Contains(MembershipRoles.PlatformAdmin, StringComparer.OrdinalIgnoreCase)) return Results.Forbid();
+            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Demo roles are fixed and cannot be modified.", statusCode: 503);
 
             var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
             var assigned = await security.AssignRoleAsync(targetUserId, roleCode, actor.UserId, $"Platform administrator assigned role '{roleCode}'.", ct);
@@ -164,9 +188,12 @@ public static class MembershipEndpoints
 
     private static async Task<AuthenticatedMember?> ResolveMemberAsync(HttpRequest request, HttpContext context, string? databaseUrl, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(databaseUrl)) return null;
+        var token = GetBearerToken(request);
+        if (string.IsNullOrWhiteSpace(databaseUrl))
+            return context.RequestServices.GetRequiredService<DemoMembershipAuthStore>().Resolve(token);
+
         var auth = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
-        var userId = await auth.ValidateSessionAsync(GetBearerToken(request), ct);
+        var userId = await auth.ValidateSessionAsync(token, ct);
         if (userId is null) return null;
 
         var repository = context.RequestServices.GetRequiredService<PostgresMembershipRepository>();
