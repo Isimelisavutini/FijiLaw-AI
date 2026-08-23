@@ -1,6 +1,6 @@
 'use client';
 
-import { Show, UserButton } from '@clerk/nextjs';
+import { SignedIn, SignedOut, UserButton } from '@clerk/nextjs';
 import { usePathname } from 'next/navigation';
 
 export default function MembershipEntryBar() {
@@ -21,11 +21,11 @@ export default function MembershipEntryBar() {
     </div>
     <div className="membershipEntryActions">
       {clerkEnabled ? <>
-        <Show when="signed-out">{signedOutActions}</Show>
-        <Show when="signed-in">
+        <SignedOut>{signedOutActions}</SignedOut>
+        <SignedIn>
           <a className="membershipPricingLink" href="/dashboard">Dashboard</a>
           <UserButton afterSignOutUrl="/" />
-        </Show>
+        </SignedIn>
       </> : signedOutActions}
     </div>
   </aside>;
