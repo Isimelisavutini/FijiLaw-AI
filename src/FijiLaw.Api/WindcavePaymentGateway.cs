@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -34,7 +35,7 @@ public sealed class WindcavePaymentGateway
         var payload = new
         {
             type = "purchase",
-            amount = order.AmountFjd.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+            amount = order.AmountFjd.ToString("0.00", CultureInfo.InvariantCulture),
             currency = order.Currency,
             merchantReference = order.Id.ToString("N"),
             language = "en",
@@ -59,15 +60,15 @@ public sealed class WindcavePaymentGateway
 
         using var doc = JsonDocument.Parse(content);
         var root = doc.RootElement;
-        var sessionId = root.TryGetProperty("id", out var idElement) ? idElement.GetString() : null;
+        var sessionId = ReadString(root, "id");
         string? checkoutUrl = null;
         if (root.TryGetProperty("links", out var links) && links.ValueKind == JsonValueKind.Array)
         {
             foreach (var link in links.EnumerateArray())
             {
-                var rel = link.TryGetProperty("rel", out var relElement) ? relElement.GetString() : null;
+                var rel = ReadString(link, "rel");
                 if (!string.Equals(rel, "hpp", StringComparison.OrdinalIgnoreCase)) continue;
-                checkoutUrl = link.TryGetProperty("href", out var hrefElement) ? hrefElement.GetString() : null;
+                checkoutUrl = ReadString(link, "href");
                 break;
             }
         }
@@ -86,30 +87,71 @@ public sealed class WindcavePaymentGateway
         ApplyAuth(request);
         using var response = await _http.SendAsync(request, ct);
         if (!response.IsSuccessStatusCode) return new PaymentVerificationResult(false, $"provider-http-{(int)response.StatusCode}");
+
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
         var root = doc.RootElement;
-        var state = root.TryGetProperty("state", out var stateElement) ? stateElement.GetString() ?? "unknown" : "unknown";
-        var authorised = false;
-        string? providerReference = order.ProviderSessionId;
+        var state = ReadString(root, "state") ?? "unknown";
+        var expectedReference = order.Id.ToString("N");
 
-        if (root.TryGetProperty("transactions", out var transactions) && transactions.ValueKind == JsonValueKind.Array)
+        if (!string.Equals(ReadString(root, "id"), order.ProviderSessionId, StringComparison.Ordinal))
+            return new PaymentVerificationResult(false, "session-id-mismatch");
+        if (!string.Equals(ReadString(root, "type"), "purchase", StringComparison.OrdinalIgnoreCase))
+            return new PaymentVerificationResult(false, "session-type-mismatch");
+        if (!MatchesAmount(root, order.AmountFjd))
+            return new PaymentVerificationResult(false, "session-amount-mismatch");
+        if (!string.Equals(ReadString(root, "currency"), order.Currency, StringComparison.OrdinalIgnoreCase))
+            return new PaymentVerificationResult(false, "session-currency-mismatch");
+        if (!string.Equals(ReadString(root, "merchantReference"), expectedReference, StringComparison.Ordinal))
+            return new PaymentVerificationResult(false, "session-reference-mismatch");
+
+        if (!root.TryGetProperty("transactions", out var transactions) || transactions.ValueKind != JsonValueKind.Array || transactions.GetArrayLength() == 0)
+            return new PaymentVerificationResult(false, state);
+
+        var transaction = transactions[0];
+        var providerReference = ReadString(transaction, "id") ?? order.ProviderSessionId;
+        if (!transaction.TryGetProperty("authorised", out var authorisedElement) || authorisedElement.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            return new PaymentVerificationResult(false, state, providerReference);
+        if (!authorisedElement.GetBoolean())
+            return new PaymentVerificationResult(false, state, providerReference);
+
+        if (!string.Equals(ReadString(transaction, "type"), "purchase", StringComparison.OrdinalIgnoreCase))
+            return new PaymentVerificationResult(false, "transaction-type-mismatch", providerReference);
+        if (!MatchesAmount(transaction, order.AmountFjd))
+            return new PaymentVerificationResult(false, "transaction-amount-mismatch", providerReference);
+        if (!string.Equals(ReadString(transaction, "currency"), order.Currency, StringComparison.OrdinalIgnoreCase))
+            return new PaymentVerificationResult(false, "transaction-currency-mismatch", providerReference);
+        if (!string.Equals(ReadString(transaction, "merchantReference"), expectedReference, StringComparison.Ordinal))
+            return new PaymentVerificationResult(false, "transaction-reference-mismatch", providerReference);
+
+        return new PaymentVerificationResult(true, state, providerReference);
+    }
+
+    private static string? ReadString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var value)) return null;
+        return value.ValueKind switch
         {
-            foreach (var transaction in transactions.EnumerateArray())
-            {
-                if (transaction.TryGetProperty("authorised", out var authorisedElement) && authorisedElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
-                {
-                    authorised = authorisedElement.GetBoolean();
-                    if (authorised)
-                    {
-                        if (transaction.TryGetProperty("id", out var txId) && !string.IsNullOrWhiteSpace(txId.GetString())) providerReference = txId.GetString();
-                        break;
-                    }
-                }
-            }
-        }
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            _ => null
+        };
+    }
 
-        return new PaymentVerificationResult(authorised, state, providerReference);
+    private static bool MatchesAmount(JsonElement element, decimal expected)
+    {
+        if (!element.TryGetProperty("amount", out var amount)) return false;
+        decimal actual;
+        if (amount.ValueKind == JsonValueKind.Number)
+        {
+            if (!amount.TryGetDecimal(out actual)) return false;
+        }
+        else if (amount.ValueKind == JsonValueKind.String)
+        {
+            if (!decimal.TryParse(amount.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out actual)) return false;
+        }
+        else return false;
+        return actual == expected;
     }
 
     private void ApplyAuth(HttpRequestMessage request)
