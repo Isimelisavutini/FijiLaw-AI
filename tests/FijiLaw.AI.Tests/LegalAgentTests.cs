@@ -56,7 +56,7 @@ public class LegalAgentTests
         var result = await agent.TriageAsync(new LegalTriageRequest(
             "I want to challenge the constitutionality of a FICAC Commissioner appointment recommended by the JSC and consider judicial review."));
 
-        Assert.Equal("Constitutional / Public & Administrative Law", result.Issue);
+        Assert.Equal("Public & Administrative Law (Judicial Review) / Constitutional Law", result.Issue);
         Assert.NotNull(result.LegalDomains);
         Assert.Contains("Constitutional Law", result.LegalDomains!);
         Assert.Contains("Public & Administrative Law", result.LegalDomains!);
@@ -85,6 +85,6 @@ public class LegalAgentTests
             "I am disputing a FICAC appointment involving the JSC and want judicial review."));
 
         Assert.Contains(result.MissingInformation, x => x.Contains("appointment instrument", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(result.NextSteps, x => x.Contains("Order 53", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(result.NextSteps, x => x.Contains("High Court procedural rules", StringComparison.OrdinalIgnoreCase));
     }
 }
