@@ -15,7 +15,8 @@ var resendApiKey = builder.Configuration["RESEND_API_KEY"];
 var emailFrom = builder.Configuration["EMAIL_FROM"];
 var publicWebUrl = builder.Configuration["PUBLIC_WEB_URL"];
 var demoAuthEnabled = string.Equals(builder.Configuration["DEMO_AUTH_ENABLED"], "true", StringComparison.OrdinalIgnoreCase);
-var demoPassword = demoAuthEnabled ? builder.Configuration["DEMO_AUTH_PASSWORD"] : null;
+// Public, temporary demo credential. This fallback is intentionally non-secret and is disabled when PostgreSQL is connected.
+var demoPassword = demoAuthEnabled ? (builder.Configuration["DEMO_AUTH_PASSWORD"] ?? "FijiLawDemo2026!") : null;
 var configuredOrigins = new[]
 {
     builder.Configuration["WebOrigin"],
