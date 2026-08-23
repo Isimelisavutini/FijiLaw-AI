@@ -10,6 +10,11 @@ export const metadata = {
   description: 'Supervised AI legal assistance for Fiji'
 };
 
+export const viewport = {
+  themeColor: '#0E2A47',
+  colorScheme: 'light'
+};
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const app = <ApiResilience><MembershipEntryBar />{children}</ApiResilience>;
   const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
