@@ -213,60 +213,62 @@ On mobile the sidebar becomes a compact menu/navigation surface.
 
 ### D1 — Shared dashboard shell
 - [x] Existing server-side `Dashboard.Access` endpoint/gate
-- [ ] Shared top bar
-- [ ] Permission-aware sidebar
-- [ ] User/plan badge
-- [ ] Responsive mobile navigation
-- [ ] Reusable KPI card
-- [ ] Reusable activity/matter list
+- [x] Shared top bar
+- [x] Permission-aware sidebar
+- [x] User/plan badge
+- [x] Responsive mobile navigation
+- [x] Reusable KPI card presentation
+- [x] Reusable recent-activity presentation
 
 ### D2 — Free upgrade experience
 - [x] Existing free-user 403/upgrade handling
-- [ ] Rich locked dashboard preview
-- [ ] Compare-plan CTA
-- [ ] Preserve intended plan into registration/checkout flow
+- [x] Rich locked dashboard preview
+- [x] Compare-plan CTA
+- [x] Preserve intended plan into registration flow
+- [ ] Preserve intended plan into live checkout/billing flow
 
 ### D3 — Personal Plus
-- [ ] Overview
-- [ ] Legal matters module shell
-- [ ] Saved reports module shell
-- [ ] Documents/evidence module shell
-- [ ] Deadlines module shell
-- [ ] Lawyers/referrals module shell
-- [ ] Billing/account links
+- [x] Overview shell
+- [x] Legal matters module shell
+- [ ] Saved reports module with persistent report data
+- [x] Documents/evidence module shell
+- [ ] Deadlines module with persistent deadline data
+- [x] Lawyers/referrals module shell
+- [x] Billing/account links
 
 ### D4 — Lawyer Professional
-- [ ] Lawyer overview
-- [ ] Enquiries/leads shell
-- [ ] Referral review cards
-- [ ] Matter list
-- [ ] AI legal research entry
-- [ ] Professional profile module
-- [ ] Analytics shell
+- [x] Lawyer overview shell
+- [x] Enquiries/leads shell
+- [ ] Referral review cards backed by referral data
+- [x] Matter list shell
+- [x] AI legal research entry
+- [x] Professional profile module shell
+- [x] Analytics shell
 
 ### D5 — Law Firm dashboards
-- [ ] Starter overview/profile/enquiries
-- [ ] Professional lead pipeline
-- [ ] Professional team/staff controls
+- [x] Starter overview/profile/enquiries shell
+- [x] Professional lead pipeline shell
+- [x] Professional team/staff shell gated by `FirmUsers.Manage`
 - [ ] Premium growth/placement tools
 - [ ] Multiple office architecture
 
 ### D6 — Institutional
-- [ ] Institutional navigation
-- [ ] Referral/work queues
-- [ ] Offices/users
-- [ ] Regional/service-demand analytics
-- [ ] Reporting/export permissions
+- [x] Institutional navigation shell
+- [x] Referral/work-queue shell
+- [x] Offices/users shell
+- [x] Regional/service-demand analytics shell
+- [ ] Reporting/export permission and backing API
 
 ### D7 — Platform Admin
-- [ ] Admin navigation
-- [ ] Membership/subscription metrics
-- [ ] User/organisation administration
-- [ ] Practitioner verification
-- [ ] Legal corpus operations
-- [ ] AI operations
-- [ ] Security/audit views
-- [ ] Revenue analytics
+- [x] Admin navigation shell
+- [x] Membership/subscription KPI shell
+- [x] User/organisation administration entry shells
+- [x] Practitioner verification entry shell
+- [x] Legal corpus operations entry shell
+- [x] AI operations entry shell
+- [x] Security/audit entry shell
+- [x] Revenue analytics entry shell
+- [ ] Back all admin modules with live administrative APIs and audit-tested actions
 
 ### D8 — Backing data/APIs
 - [ ] Cases API/data model
@@ -277,6 +279,9 @@ On mobile the sidebar becomes a compact menu/navigation surface.
 - [ ] Notification model
 - [ ] Analytics aggregation
 - [ ] Billing provider integration
+
+## Current implementation note
+The shared UI shell intentionally displays `—` for metrics that do not yet have a persistent backing data source. This avoids manufacturing business/case statistics. Permission-aware module entry points are visible only when the authenticated server response grants the corresponding permission.
 
 ## Definition of done
 A dashboard module is complete only when:
