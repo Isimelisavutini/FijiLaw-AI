@@ -15,7 +15,7 @@ var resendApiKey = builder.Configuration["RESEND_API_KEY"];
 var emailFrom = builder.Configuration["EMAIL_FROM"];
 var publicWebUrl = builder.Configuration["PUBLIC_WEB_URL"];
 var demoAuthEnabled = string.Equals(builder.Configuration["DEMO_AUTH_ENABLED"], "true", StringComparison.OrdinalIgnoreCase);
-// Public, temporary demo credential. This fallback is intentionally non-secret and is disabled when PostgreSQL is connected.
+var seedDemoAccounts = string.Equals(builder.Configuration["SEED_DEMO_ACCOUNTS"], "true", StringComparison.OrdinalIgnoreCase);
 var demoPassword = demoAuthEnabled ? (builder.Configuration["DEMO_AUTH_PASSWORD"] ?? "FijiLawDemo2026!") : null;
 var configuredOrigins = new[]
 {
@@ -43,53 +43,24 @@ else
     builder.Services.AddSingleton(_ => new PostgresMembershipSecurityStore(databaseUrl));
     builder.Services.AddSingleton(_ => new PostgresCreditWalletStore(databaseUrl));
     builder.Services.AddSingleton<ICreditWalletStore>(sp => sp.GetRequiredService<PostgresCreditWalletStore>());
+    builder.Services.AddSingleton(sp => new PostgresDemoAccountSeeder(databaseUrl, sp.GetRequiredService<PostgresMembershipAuthStore>()));
 }
 
 builder.Services.AddSingleton(new DemoMembershipAuthStore(string.IsNullOrWhiteSpace(databaseUrl) ? demoPassword : null));
-builder.Services.AddSingleton(_ => new ResendEmailSender(
-    new HttpClient { Timeout = TimeSpan.FromSeconds(20) },
-    resendApiKey,
-    emailFrom,
-    publicWebUrl));
+builder.Services.AddSingleton(_ => new ResendEmailSender(new HttpClient { Timeout = TimeSpan.FromSeconds(20) }, resendApiKey, emailFrom, publicWebUrl));
 
-if (string.IsNullOrWhiteSpace(openAiApiKey))
-{
-    builder.Services.AddSingleton<ILanguageModelProvider, DisabledLanguageModelProvider>();
-}
-else
-{
-    builder.Services.AddSingleton<ILanguageModelProvider>(_ =>
-        new OpenAIResponsesProvider(new HttpClient { Timeout = TimeSpan.FromSeconds(45) }, openAiApiKey, openAiModel));
-}
+if (string.IsNullOrWhiteSpace(openAiApiKey)) builder.Services.AddSingleton<ILanguageModelProvider, DisabledLanguageModelProvider>();
+else builder.Services.AddSingleton<ILanguageModelProvider>(_ => new OpenAIResponsesProvider(new HttpClient { Timeout = TimeSpan.FromSeconds(45) }, openAiApiKey, openAiModel));
 
 builder.Services.AddSingleton<ILegalAgent, LegalAgent>();
 builder.Services.AddSingleton<DocumentTextExtractor>();
 builder.Services.AddSingleton<LegalServicesDirectory>();
-builder.Services.AddCors(options => options.AddDefaultPolicy(policy =>
-    policy.SetIsOriginAllowed(origin => IsAllowedWebOrigin(origin, configuredOrigins))
-          .AllowAnyHeader()
-          .AllowAnyMethod()));
+builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy.SetIsOriginAllowed(origin => IsAllowedWebOrigin(origin, configuredOrigins)).AllowAnyHeader().AllowAnyMethod()));
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.AddPolicy("auth", httpContext => RateLimitPartition.GetFixedWindowLimiter(
-        partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-        factory: _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = 10,
-            Window = TimeSpan.FromMinutes(1),
-            QueueLimit = 0,
-            AutoReplenishment = true
-        }));
-    options.AddPolicy("verification", httpContext => RateLimitPartition.GetFixedWindowLimiter(
-        partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-        factory: _ => new FixedWindowRateLimiterOptions
-        {
-            PermitLimit = 5,
-            Window = TimeSpan.FromMinutes(10),
-            QueueLimit = 0,
-            AutoReplenishment = true
-        }));
+    options.AddPolicy("auth", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+    options.AddPolicy("verification", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(10), QueueLimit = 0, AutoReplenishment = true }));
 });
 
 var app = builder.Build();
@@ -111,6 +82,7 @@ if (!string.IsNullOrWhiteSpace(databaseUrl))
     await scope.ServiceProvider.GetRequiredService<PostgresMembershipAuthStore>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresMembershipSecurityStore>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresCreditWalletStore>().EnsureCreatedAsync();
+    if (seedDemoAccounts) await scope.ServiceProvider.GetRequiredService<PostgresDemoAccountSeeder>().EnsureSeededAsync();
 }
 
 app.MapGet("/health", (ILanguageModelProvider modelProvider, ResendEmailSender emailSender, DemoMembershipAuthStore demoAuth) => Results.Ok(new
@@ -124,6 +96,7 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider, ResendEmailSender e
     membershipSecurity = !string.IsNullOrWhiteSpace(databaseUrl) ? "available" : demoAuth.IsEnabled ? "demo" : "awaiting-postgresql",
     creditWallet = !string.IsNullOrWhiteSpace(databaseUrl) ? "postgresql" : demoAuth.IsEnabled ? "demo-memory" : "unavailable",
     creditMetering = "enabled",
+    demoAccountsSeeded = !string.IsNullOrWhiteSpace(databaseUrl) && seedDemoAccounts,
     emailDelivery = emailSender.IsConfigured ? "configured" : "awaiting-resend-config",
     aiProvider = modelProvider.Name,
     aiEnabled = modelProvider.IsEnabled,
@@ -155,9 +128,7 @@ app.MapGet("/api/membership/plans", async (HttpContext context, CancellationToke
 
 app.MapMembershipEndpoints(databaseUrl);
 app.MapCreditEndpoints(databaseUrl);
-
-app.MapGet("/api/legal-services", (string? city, string? type, string? area, string? q, LegalServicesDirectory directory) =>
-    Results.Ok(new { items = directory.Search(city, type, area, q), cities = directory.Cities() }));
+app.MapGet("/api/legal-services", (string? city, string? type, string? area, string? q, LegalServicesDirectory directory) => Results.Ok(new { items = directory.Search(city, type, area, q), cities = directory.Cities() }));
 
 app.MapPost("/api/admin/legal-sources", async (HttpRequest httpRequest, LegalSourceInput input, CancellationToken ct) =>
 {
