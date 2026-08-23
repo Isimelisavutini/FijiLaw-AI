@@ -14,7 +14,7 @@ The frontend may hide or preview features, but authorization MUST be enforced by
 
 | Role code | User type | Purpose |
 |---|---|---|
-| `guest` | Anonymous visitor | Public website and limited public legal tools only |
+| `guest` | Anonymous visitor | Public website plus a limited three-report legal-triage trial |
 | `citizen` | Registered public user | Citizen/member identity |
 | `lawyer` | Individual legal practitioner | Lawyer professional tools |
 | `firm_staff` | Law firm staff | Firm workflow access assigned by organisation |
@@ -66,13 +66,22 @@ Allowed experience:
 - Public landing page
 - Pricing page
 - Public legal information/resources
-- Limited anonymous legal triage where enabled
+- Up to **3 successful Advanced Legal Triage Reports without registration**
 - Find a Lawyer / Find Legal Aid
 - Registration and sign-in
 
+Guest-trial rules:
+- A guest receives three successful legal-triage reports free of FijiLaw Credits.
+- Failed triage workflows do not consume a guest attempt.
+- The guest allowance is enforced by the API and persisted in `guest_triage_trials`; frontend state is informational only.
+- The web client supplies a random guest trial identifier. The API stores only its one-way hash, not the raw identifier.
+- After the third successful report, further guest triage requests are denied and the user is directed to create a free account or sign in.
+- Guest document analysis remains unavailable; document analysis requires an authenticated member and FijiLaw Credits.
+- Guest legal-triage access is additionally subject to API rate limiting and abuse controls.
+
 Conversion path:
 
-`Guest -> Free Member -> Paid Member`
+`Guest (3 free triage reports) -> Free Member -> Paid Member`
 
 ## Registered Free Member
 
