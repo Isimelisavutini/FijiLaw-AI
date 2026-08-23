@@ -3,7 +3,7 @@ using Npgsql;
 
 namespace FijiLaw.Infrastructure;
 
-public sealed class PostgresDemoAccountSeeder(string connectionString, PostgresMembershipAuthStore authStore)
+public sealed class PostgresDemoAccountSeeder(string connectionString, PostgresMembershipAuthStore authStore, PostgresCreditWalletStore creditStore)
 {
     private const string Password = "FijiLawDemo2026!";
 
@@ -30,6 +30,7 @@ public sealed class PostgresDemoAccountSeeder(string connectionString, PostgresM
                 userId = session.UserId;
             }
             await ConfigureAsync(userId.Value, account.Role, account.Plan, ct);
+            await creditStore.GetWalletAsync(userId.Value, account.Plan, ct);
         }
     }
 
