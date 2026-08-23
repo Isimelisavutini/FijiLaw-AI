@@ -12,6 +12,9 @@ public static class CreditEndpoints
 {
     public static WebApplication MapCreditEndpoints(this WebApplication app, string? databaseUrl)
     {
+        var guestTrials = new GuestTriageTrialStore(databaseUrl);
+        guestTrials.EnsureCreatedAsync().GetAwaiter().GetResult();
+
         app.MapGet("/api/credits/catalog", (WindcavePaymentGateway gateway) => Results.Ok(new
         {
             currency = "FJD",
@@ -130,10 +133,79 @@ public static class CreditEndpoints
             return Results.Ok(new { granted = true, wallet });
         });
 
+        app.MapGet("/api/legal/guest-trial-status", async (HttpRequest request, CancellationToken ct) =>
+        {
+            var guestId = request.Headers["X-FijiLaw-Guest-Id"].ToString();
+            try
+            {
+                var status = await guestTrials.GetStatusAsync(guestId, ct);
+                return Results.Ok(new
+                {
+                    status.Used,
+                    status.Remaining,
+                    status.Limit,
+                    status.Exhausted,
+                    signUpRequired = status.Exhausted
+                });
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+        }).RequireRateLimiting("auth");
+
         app.MapPost("/api/legal/triage", async (LegalTriageRequest body, HttpRequest request, HttpContext context, ILegalAgent agent, CancellationToken ct) =>
         {
             var member = await ResolveMemberAsync(request, context, databaseUrl, ct);
-            if (member is null) return Results.Json(new { error = "Sign in is required to use FijiLaw AI services.", signInRequired = true }, statusCode: StatusCodes.Status401Unauthorized);
+
+            if (member is null)
+            {
+                var guestId = request.Headers["X-FijiLaw-Guest-Id"].ToString();
+                GuestTriageTrialStatus? trial;
+                try
+                {
+                    trial = await guestTrials.TryReserveAsync(guestId, ct);
+                }
+                catch (ArgumentException ex)
+                {
+                    return Results.BadRequest(new { error = ex.Message, guestTrial = true });
+                }
+
+                if (trial is null)
+                {
+                    return Results.Json(new
+                    {
+                        error = "You have used your 3 free FijiLaw AI triage reports. Create a free account or sign in to continue.",
+                        guestTrial = true,
+                        guestTrialExhausted = true,
+                        signUpRequired = true,
+                        limit = GuestTriageTrialStore.TrialLimit,
+                        remaining = 0,
+                        registerUrl = "/account?mode=register",
+                        signInUrl = "/account?mode=login"
+                    }, statusCode: StatusCodes.Status403Forbidden);
+                }
+
+                try
+                {
+                    var guestResult = await agent.TriageAsync(body, ct);
+                    context.Response.Headers["X-FijiLaw-Guest-Trial"] = "true";
+                    context.Response.Headers["X-FijiLaw-Guest-Trials-Used"] = trial.Used.ToString();
+                    context.Response.Headers["X-FijiLaw-Guest-Trials-Remaining"] = trial.Remaining.ToString();
+                    return Results.Ok(guestResult);
+                }
+                catch (ArgumentException ex)
+                {
+                    await guestTrials.ReleaseAsync(guestId, ct);
+                    return Results.BadRequest(new { error = ex.Message, guestTrial = true });
+                }
+                catch
+                {
+                    await guestTrials.ReleaseAsync(guestId, ct);
+                    throw;
+                }
+            }
+
             var price = FijiLawCreditCatalog.PriceFor(FijiLawCreditCatalog.AdvancedTriage);
             var store = context.RequestServices.GetRequiredService<ICreditWalletStore>();
             var correlation = Guid.NewGuid().ToString("N");
@@ -161,7 +233,7 @@ public static class CreditEndpoints
                 await store.RefundAsync(reservation, "AI/legal triage workflow failed before completion.", ct);
                 throw;
             }
-        });
+        }).RequireRateLimiting("auth");
 
         app.MapPost("/api/legal/documents/analyse", async (IFormFile file, HttpRequest request, HttpContext context, DocumentTextExtractor extractor, ILegalAgent agent, CancellationToken ct) =>
         {
