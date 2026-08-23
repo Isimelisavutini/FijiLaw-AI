@@ -2,10 +2,12 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { API_BASE, fetchWithTimeout, readApiError, SERVICE_UNAVAILABLE_MESSAGE } from '../../lib/api';
+import VerifiedIdentityAccess from './VerifiedIdentityAccess';
 
 type MembershipHealth = 'checking' | 'ready' | 'demo' | 'unavailable';
 
 export default function AccountPage() {
+  const clerkEnabled=Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
   const [mode,setMode]=useState<'login'|'register'>('login');
   const [selectedPlan,setSelectedPlan]=useState('');
   const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [displayName,setDisplayName]=useState('');
@@ -18,8 +20,8 @@ export default function AccountPage() {
     if(requestedMode==='register') setMode('register');
     if(requestedMode==='login') setMode('login');
     setSelectedPlan(params.get('plan')??'');
-    void checkMembershipService();
-  },[]);
+    if(!clerkEnabled) void checkMembershipService();
+  },[clerkEnabled]);
 
   async function checkMembershipService(){
     setMembershipHealth('checking');
@@ -49,7 +51,7 @@ export default function AccountPage() {
       if(response.status===401){setMessage('Your sign-in session has expired. Please sign in again.');return;}
       if(!response.ok) throw new Error(await readApiError(response,'Verification request could not be created.'));
       const body=await response.json().catch(()=>({}));
-      if(body.alreadyVerified){setMessage('Your email is already verified. You can continue to the dashboard.');return;}
+      if(body.alreadyVerified){setMessage('Your identity is already verified. You can continue to the dashboard.');return;}
       if(body.deliveryAccepted){setMessage('Verification email accepted for delivery. Check your inbox and follow the verification link.');return;}
       setMessage(body.deliveryConfigured===false
         ? 'Your account is ready, but outbound verification email delivery is not configured yet. Paid dashboard access remains locked until email delivery is enabled and your address is verified.'
@@ -90,6 +92,8 @@ export default function AccountPage() {
     finally{setLoading(false);}
   }
 
+  if(clerkEnabled) return <VerifiedIdentityAccess mode={mode} selectedPlan={selectedPlan} onModeChange={setMode}/>;
+
   const unavailable=membershipHealth==='unavailable';
   const demo=membershipHealth==='demo';
   const actionDisabled=loading||membershipHealth==='checking'||unavailable||(demo&&mode==='register');
@@ -107,7 +111,7 @@ export default function AccountPage() {
     {mode==='register'&&!registered&&<section style={{background:'#f4f7f4',border:'1px solid #d5ddd7',borderRadius:14,padding:18,margin:'22px 0'}}><strong>Review pricing before registering.</strong><p style={{margin:'6px 0 12px',color:'#5b695f',lineHeight:1.55}}>You can create a free account, or choose a paid membership for dashboard access. Creating an account does not automatically charge you.</p>{selectedPlan?<p style={{margin:'0 0 12px',fontSize:13}}><strong>Selected plan:</strong> {selectedPlan.replaceAll('_',' ')}</p>:null}<a href="/pricing" style={{color:'#173f2b',fontWeight:800}}>Compare membership plans →</a></section>}
 
     {registered ? <section style={{background:'#fff',border:'1px solid #d5ddd7',borderRadius:18,padding:28,marginTop:28}}>
-      <h2 style={{fontFamily:'Georgia,serif',fontWeight:500,fontSize:30,marginTop:0}}>Verify your email before using paid features.</h2>
+      <h2 style={{fontFamily:'Georgia,serif',fontWeight:500,fontSize:30,marginTop:0}}>Verify your email before using protected features.</h2>
       <p style={{lineHeight:1.7,color:'#53635a'}}>{message}</p>
       {selectedPlan&&<p style={{lineHeight:1.6,color:'#53635a'}}>Your selected plan is <strong>{selectedPlan.replaceAll('_',' ')}</strong>. This preference has been recorded, but subscription activation occurs only after a completed payment flow.</p>}
       <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:20}}><button onClick={()=>void requestVerification()} style={{...primary,width:'auto'}}>Request verification again</button><a href="/dashboard" style={linkButton}>Continue to dashboard</a><a href="/pricing" style={linkButton}>View membership plans</a></div>
