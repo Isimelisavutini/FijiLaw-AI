@@ -234,7 +234,7 @@ public static class MembershipEndpoints
         var emailVerified = reader.GetBoolean(2);
         var phoneNumber = reader.IsDBNull(3) ? null : reader.GetString(3);
         var phoneVerified = reader.GetBoolean(4);
-        var identityVerifiedAt = reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5);
+        DateTimeOffset? identityVerifiedAt = reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5);
         return new AuthenticatedMember(userId.Value, email, displayName, emailVerified, access.Roles, access.Permissions, access.PlanCode, access.SubscriptionStatus, access.CurrentPeriodEnd,
             phoneNumber, phoneVerified, identityVerifiedAt);
     }
