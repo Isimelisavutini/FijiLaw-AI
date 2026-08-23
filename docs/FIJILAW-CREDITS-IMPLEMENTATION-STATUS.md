@@ -30,6 +30,11 @@ Core FijiLaw Credits metering, persistent wallet storage, and Fiji-ready hosted 
 - [x] Idempotent server-side purchased-credit grant path
 - [x] Windcave Hosted Payment Page adapter
 - [x] Server-side Windcave session verification before granting credits
+- [x] Exact-order payment verification: session ID, purchase type, amount, currency and merchant reference
+- [x] Authorised transaction must match the same order before wallet crediting
+- [x] Verification mismatches fail closed and cannot grant credits
+- [x] Dedicated checkout/status rate limiting
+- [x] Separate provider-notification rate limiting
 - [x] Hosted-payment return/status flow on `/credits`
 - [x] Vercel frontend build pipeline configured
 - [x] Railway backend health deployment pipeline configured
@@ -93,8 +98,11 @@ These values must never be exposed through browser environment variables or comm
 4. Customer is redirected to Windcave for card entry/payment.
 5. FijiLaw receives a notification or the customer returns to the credits page.
 6. FijiLaw queries the Windcave session directly from the backend.
-7. Credits are granted only when the provider session reports an authorised transaction.
-8. The payment order and purchased-credit transaction are committed idempotently so repeat callbacks cannot double-credit the wallet.
+7. The returned session ID, type, amount, FJD currency and merchant reference must exactly match the stored FijiLaw payment order.
+8. The first provider transaction must be authorised and its type, amount, currency and merchant reference must also match the order.
+9. Any verification mismatch fails closed and the order is marked as verification failed.
+10. Credits are granted only after all server-side checks succeed.
+11. The payment order and purchased-credit transaction are committed idempotently so repeat callbacks cannot double-credit the wallet.
 
 ## Production database
 The production Railway API uses Neon PostgreSQL for membership, authentication, subscriptions, credit wallets, credit transactions and payment orders. Database credentials are runtime-only.
@@ -124,10 +132,12 @@ FijiLaw Credits remain FijiLaw usage units regardless of the underlying model/pr
 3. Credit balance changes are recorded in a transaction ledger.
 4. Metered workflows reserve credits before execution and refund on failure.
 5. Paid credit purchases require authoritative server-side provider verification.
-6. Duplicate provider callbacks cannot grant the same purchase twice.
-7. Payment card data is handled by the hosted payment provider rather than FijiLaw servers.
-8. OpenAI and payment-provider credentials remain server-side.
-9. Sponsored commercial placement remains separate from legal reasoning and neutral legal recommendations.
+6. Provider session and transaction values must exactly match the stored internal payment order.
+7. Duplicate provider callbacks cannot grant the same purchase twice.
+8. Checkout and reconciliation endpoints are rate limited.
+9. Payment card data is handled by the hosted payment provider rather than FijiLaw servers.
+10. OpenAI and payment-provider credentials remain server-side.
+11. Sponsored commercial placement remains separate from legal reasoning and neutral legal recommendations.
 
 ## Release readiness
 The wallet and payment workflow are technically ready for controlled testing. Real customer card collection becomes production-ready only after merchant credentials are configured, provider test transactions are completed, and the commercial/refund terms are reviewed.
