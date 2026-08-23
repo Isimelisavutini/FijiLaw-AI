@@ -35,6 +35,10 @@ export default function AccountPage() {
     }catch{setMembershipHealth('unavailable');}
   }
 
+  function providerUnavailable(provider:string){
+    setMessage(`${provider} registration is part of the verified FijiLaw sign-up flow. This deployment is still awaiting the secure identity-provider configuration, so use verified email registration below for now.`);
+  }
+
   async function requestVerification(){
     if(membershipHealth==='demo'){
       setMessage('Temporary demo accounts are already treated as verified for dashboard testing.');
@@ -98,10 +102,10 @@ export default function AccountPage() {
   const demo=membershipHealth==='demo';
   const actionDisabled=loading||membershipHealth==='checking'||unavailable||(demo&&mode==='register');
 
-  return <main style={{maxWidth:760,margin:'0 auto',padding:'54px 24px 80px',fontFamily:'Inter,system-ui,sans-serif',color:'#16231c'}}>
+  return <main style={{maxWidth:820,margin:'0 auto',padding:'54px 24px 80px',fontFamily:'Inter,system-ui,sans-serif',color:'#16231c'}}>
     <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'center'}}><a href="/" style={{color:'#173f2b',fontWeight:800,textDecoration:'none'}}>FijiLaw AI</a><a href="/pricing" style={{color:'#173f2b',fontWeight:800,textDecoration:'none'}}>View Pricing</a></div>
     <p style={{letterSpacing:'.14em',fontSize:12,fontWeight:800,color:'#587063',marginTop:48}}>MEMBER ACCESS</p>
-    <h1 style={{fontFamily:'Georgia,serif',fontSize:52,fontWeight:500,margin:'8px 0 16px'}}>{registered?'Account created.':mode==='login'?'Sign in to FijiLaw.':'Create your FijiLaw account.'}</h1>
+    <h1 style={{fontFamily:'Georgia,serif',fontSize:52,fontWeight:500,margin:'8px 0 16px'}}>{registered?'Account created.':mode==='login'?'Sign in to FijiLaw.':'Create your verified FijiLaw account.'}</h1>
     <p style={{color:'#5c6b62',lineHeight:1.6}}>Registration itself is free. Public legal access remains available without a paid dashboard. Paid memberships unlock the FijiLaw dashboard, saved legal matters and professional workflows.</p>
 
     {membershipHealth==='checking'&&<section role="status" style={statusBox}><strong>Checking secure member service…</strong><p style={statusText}>FijiLaw AI is confirming that protected account storage is available before accepting credentials.</p></section>}
@@ -116,17 +120,32 @@ export default function AccountPage() {
       {selectedPlan&&<p style={{lineHeight:1.6,color:'#53635a'}}>Your selected plan is <strong>{selectedPlan.replaceAll('_',' ')}</strong>. This preference has been recorded, but subscription activation occurs only after a completed payment flow.</p>}
       <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:20}}><button onClick={()=>void requestVerification()} style={{...primary,width:'auto'}}>Request verification again</button><a href="/dashboard" style={linkButton}>Continue to dashboard</a><a href="/pricing" style={linkButton}>View membership plans</a></div>
     </section> : <>
-      <div style={{display:'flex',gap:8,margin:'28px 0'}}><button type="button" onClick={()=>setMode('login')} style={tab(mode==='login')}>Sign in</button><button type="button" onClick={()=>setMode('register')} style={tab(mode==='register')}>Register</button></div>
+      <div style={{display:'flex',gap:8,margin:'28px 0'}}><button type="button" onClick={()=>{setMode('login');setMessage('')}} style={tab(mode==='login')}>Sign in</button><button type="button" onClick={()=>{setMode('register');setMessage('')}} style={tab(mode==='register')}>Register</button></div>
+
+      {mode==='register'&&<section style={methodPanel}>
+        <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'flex-start',flexWrap:'wrap'}}>
+          <div><p style={methodEyebrow}>CHOOSE HOW TO REGISTER</p><h2 style={methodHeading}>Every FijiLaw account must be verified.</h2></div>
+          <span style={verifiedBadge}>Verification required</span>
+        </div>
+        <p style={methodIntro}>Register with Google, Apple, a Fiji mobile number, or email. Google and Apple use verified identity details, Fiji mobile registration uses an SMS code, and email registration requires an email verification link.</p>
+        <div style={methodGrid}>
+          <button type="button" onClick={()=>providerUnavailable('Google')} style={providerButton}><span style={providerMark}>G</span><span><strong>Continue with Google</strong><small style={providerDetail}>Verified Google identity</small></span><span style={providerArrow}>→</span></button>
+          <button type="button" onClick={()=>providerUnavailable('Apple')} style={providerButton}><span style={providerMark}>A</span><span><strong>Continue with Apple</strong><small style={providerDetail}>Verified Apple identity</small></span><span style={providerArrow}>→</span></button>
+          <button type="button" onClick={()=>providerUnavailable('Fiji mobile')} style={providerButton}><span style={providerMark}>+679</span><span><strong>Continue with Fiji mobile</strong><small style={providerDetail}>SMS verification code</small></span><span style={providerArrow}>→</span></button>
+        </div>
+        <div style={separator}><span>or register with verified email</span></div>
+      </section>}
+
       <form onSubmit={submit} style={{background:'#fff',border:'1px solid #d5ddd7',borderRadius:18,padding:28}}>
         {mode==='register'&&<><label style={label}>Name</label><input style={input} value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Your name" autoComplete="name" disabled={unavailable}/></>}
         <label style={label}>Email</label><input style={input} type="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" disabled={unavailable}/>
         <label style={label}>Password</label><input style={input} type="password" required minLength={10} value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 10 characters" autoComplete={mode==='login'?'current-password':'new-password'} disabled={unavailable}/>
         {mode==='login'&&!demo&&<div style={{textAlign:'right',margin:'2px 0 14px'}}><a href="/forgot-password" style={{color:'#173f2b',fontSize:13,fontWeight:800}}>Forgot password?</a></div>}
-        {message&&<p role="alert" style={{background:'#fff0f0',padding:12,borderRadius:8,lineHeight:1.5}}>{message}</p>}
-        <button disabled={actionDisabled} style={{...primary,opacity:actionDisabled?0.58:1,cursor:actionDisabled?'not-allowed':'pointer'}}>{loading?'Please wait…':membershipHealth==='checking'?'Checking member service…':unavailable?'Member service unavailable':demo&&mode==='register'?'Registration awaiting database':mode==='login'?'Sign in':'Create account'}</button>
+        {message&&<p role="alert" style={{background:'#fff7e6',border:'1px solid #ead8ac',padding:12,borderRadius:8,lineHeight:1.5,color:'#5d4b25'}}>{message}</p>}
+        <button disabled={actionDisabled} style={{...primary,opacity:actionDisabled?0.58:1,cursor:actionDisabled?'not-allowed':'pointer'}}>{loading?'Please wait…':membershipHealth==='checking'?'Checking member service…':unavailable?'Member service unavailable':demo&&mode==='register'?'Registration awaiting database':mode==='login'?'Sign in':'Create verified account'}</button>
       </form>
     </>}
-    <p style={{fontSize:13,color:'#6a776f',marginTop:18}}>Passwords are never stored in plain text. Paid dashboard access is enforced by the API, not only by the browser.</p>
+    <p style={{fontSize:13,color:'#6a776f',marginTop:18}}>Passwords are never stored in plain text. Protected FijiLaw features require a verified identity, and paid dashboard access is enforced by the API rather than only by the browser.</p>
   </main>;
 }
 
@@ -139,4 +158,15 @@ const warningBox={background:'#fff8e8',border:'1px solid #ead9ad',borderRadius:1
 const demoBox={background:'#eef7f0',border:'1px solid #bcd8c5',borderRadius:12,padding:16,marginTop:20,color:'#254e35'} as const;
 const statusText={margin:'6px 0 0',lineHeight:1.55} as const;
 const retryButton={marginTop:12,border:'1px solid #ad9a68',background:'transparent',borderRadius:8,padding:'9px 12px',fontWeight:700,cursor:'pointer'} as const;
+const methodPanel={background:'#fff',border:'1px solid #d5ddd7',borderRadius:18,padding:28,margin:'0 0 18px'} as const;
+const methodEyebrow={letterSpacing:'.12em',fontSize:11,fontWeight:800,color:'#587063',margin:'0 0 7px'} as const;
+const methodHeading={fontFamily:'Georgia,serif',fontWeight:500,fontSize:28,margin:0} as const;
+const methodIntro={color:'#5c6b62',lineHeight:1.65,margin:'14px 0 18px'} as const;
+const verifiedBadge={background:'#eaf3ec',border:'1px solid #bfd3c4',color:'#234b34',padding:'7px 10px',borderRadius:999,fontSize:12,fontWeight:800} as const;
+const methodGrid={display:'grid',gap:10} as const;
+const providerButton={display:'grid',gridTemplateColumns:'54px 1fr auto',alignItems:'center',gap:12,width:'100%',textAlign:'left',border:'1px solid #cdd7d0',background:'#fbfcfb',borderRadius:12,padding:'13px 15px',color:'#16231c',cursor:'pointer'} as const;
+const providerMark={width:42,height:42,borderRadius:10,border:'1px solid #c8d3cb',display:'grid',placeItems:'center',fontWeight:900,color:'#173f2b',fontSize:14} as const;
+const providerDetail={display:'block',marginTop:3,color:'#66736b',fontSize:12,fontWeight:500} as const;
+const providerArrow={color:'#173f2b',fontWeight:900,fontSize:20} as const;
+const separator={display:'flex',alignItems:'center',justifyContent:'center',margin:'20px 0 0',fontSize:12,fontWeight:800,color:'#718078',textTransform:'uppercase',letterSpacing:'.08em'} as const;
 function tab(active:boolean){return {border:'1px solid #b8c4bc',borderRadius:999,padding:'9px 14px',background:active?'#173f2b':'transparent',color:active?'#fff':'#173f2b',fontWeight:700,cursor:'pointer'} as const;}
