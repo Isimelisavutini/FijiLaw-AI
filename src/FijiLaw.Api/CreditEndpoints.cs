@@ -12,12 +12,14 @@ public static class CreditEndpoints
 {
     public static WebApplication MapCreditEndpoints(this WebApplication app, string? databaseUrl)
     {
-        app.MapGet("/api/credits/catalog", () => Results.Ok(new
+        app.MapGet("/api/credits/catalog", (WindcavePaymentGateway gateway) => Results.Ok(new
         {
             currency = "FJD",
             terminology = "FijiLaw Credits",
             packages = FijiLawCreditCatalog.Packages,
             services = FijiLawCreditCatalog.Services,
+            paymentProvider = gateway.IsConfigured ? gateway.ProviderName : null,
+            paymentCheckoutReady = gateway.IsConfigured,
             includedByPlan = new Dictionary<string, int>
             {
                 [MembershipPlans.Free] = FijiLawCreditCatalog.IncludedCredits(MembershipPlans.Free),
@@ -60,12 +62,61 @@ public static class CreditEndpoints
                 return Results.Ok(new { simulated = true, charged = false, package, wallet, message = "Demo top-up completed. No payment was processed." });
             }
 
-            return Results.Json(new
+            var gateway = context.RequestServices.GetRequiredService<WindcavePaymentGateway>();
+            if (!gateway.IsConfigured)
             {
-                error = "Credit checkout is ready for a payment provider, but no verified payment checkout is connected yet.",
-                package,
-                paymentProviderRequired = true
-            }, statusCode: StatusCodes.Status503ServiceUnavailable);
+                return Results.Json(new
+                {
+                    error = "Online credit purchase is prepared for Windcave but merchant credentials are not configured yet.",
+                    package,
+                    paymentProviderRequired = true,
+                    recommendedProvider = "windcave"
+                }, statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+
+            var paymentStore = context.RequestServices.GetRequiredService<PostgresCreditPaymentStore>();
+            var order = await paymentStore.CreateAsync(member.UserId, member.PlanCode, package, gateway.ProviderName, ct);
+            try
+            {
+                var session = await gateway.CreateCheckoutAsync(order, member.Email, ct);
+                await paymentStore.AttachSessionAsync(order.Id, session.SessionId, session.CheckoutUrl, ct);
+                return Results.Ok(new
+                {
+                    simulated = false,
+                    charged = false,
+                    provider = session.Provider,
+                    orderId = order.Id,
+                    checkoutUrl = session.CheckoutUrl,
+                    package,
+                    message = "Redirect the customer to the hosted payment page. Credits are granted only after server-side payment verification."
+                });
+            }
+            catch (Exception ex)
+            {
+                await paymentStore.MarkFailedAsync(order.Id, "failed", ct);
+                return Results.Problem($"Payment checkout could not be started: {ex.Message}", statusCode: 502);
+            }
+        });
+
+        app.MapMethods("/api/credits/payment/notify", new[] { "GET", "POST" }, async (Guid orderId, HttpContext context, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            var outcome = await ProcessPaymentAsync(orderId, context, ct);
+            return Results.Ok(outcome);
+        });
+
+        app.MapGet("/api/credits/payment/status/{orderId:guid}", async (Guid orderId, HttpRequest request, HttpContext context, CancellationToken ct) =>
+        {
+            var member = await ResolveMemberAsync(request, context, databaseUrl, ct);
+            if (member is null) return Results.Unauthorized();
+            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Ok(new { status = "demo", completed = false });
+            var paymentStore = context.RequestServices.GetRequiredService<PostgresCreditPaymentStore>();
+            var order = await paymentStore.GetAsync(orderId, ct);
+            if (order is null) return Results.NotFound();
+            if (order.UserId != member.UserId && !member.Roles.Contains(MembershipRoles.PlatformAdmin, StringComparer.OrdinalIgnoreCase)) return Results.Forbid();
+            var outcome = await ProcessPaymentAsync(orderId, context, ct);
+            var wallet = await context.RequestServices.GetRequiredService<ICreditWalletStore>().GetWalletAsync(member.UserId, member.PlanCode, ct);
+            return Results.Ok(new { outcome.status, outcome.completed, orderId, wallet });
         });
 
         app.MapPost("/api/admin/credits/grant", async (AdminCreditGrantRequest body, HttpRequest request, HttpContext context, CancellationToken ct) =>
@@ -149,6 +200,29 @@ public static class CreditEndpoints
         }).DisableAntiforgery();
 
         return app;
+    }
+
+    private static async Task<(string status, bool completed)> ProcessPaymentAsync(Guid orderId, HttpContext context, CancellationToken ct)
+    {
+        var store = context.RequestServices.GetRequiredService<PostgresCreditPaymentStore>();
+        var gateway = context.RequestServices.GetRequiredService<WindcavePaymentGateway>();
+        var order = await store.GetAsync(orderId, ct);
+        if (order is null) return ("not-found", false);
+        if (order.Status == "completed") return ("completed", true);
+        if (!string.Equals(order.Provider, gateway.ProviderName, StringComparison.OrdinalIgnoreCase)) return ("unsupported-provider", false);
+        if (!gateway.IsConfigured) return ("provider-not-configured", false);
+
+        var verification = await gateway.VerifyAsync(order, ct);
+        if (verification.Authorised)
+        {
+            var providerReference = $"windcave:{verification.ProviderReference ?? order.ProviderSessionId ?? order.Id.ToString("N")}";
+            var granted = await store.CompleteAndGrantAsync(order.Id, providerReference, ct);
+            return (granted ? "completed" : "already-processed", granted);
+        }
+
+        if (string.Equals(verification.State, "complete", StringComparison.OrdinalIgnoreCase))
+            await store.MarkFailedAsync(order.Id, "declined", ct);
+        return (verification.State, false);
     }
 
     private static async Task<AuthenticatedMember?> ResolveMemberAsync(HttpRequest request, HttpContext context, string? databaseUrl, CancellationToken ct)
