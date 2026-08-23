@@ -1,5 +1,6 @@
 using FijiLaw.AI;
 using FijiLaw.Domain;
+using Xunit;
 
 namespace FijiLaw.AI.Tests;
 
