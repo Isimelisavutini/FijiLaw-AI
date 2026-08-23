@@ -14,6 +14,10 @@ var openAiModel = builder.Configuration["OPENAI_MODEL"] ?? "gpt-5.6-luna";
 var resendApiKey = builder.Configuration["RESEND_API_KEY"];
 var emailFrom = builder.Configuration["EMAIL_FROM"];
 var publicWebUrl = builder.Configuration["PUBLIC_WEB_URL"];
+var publicApiUrl = builder.Configuration["PUBLIC_API_URL"];
+var windcaveUsername = builder.Configuration["WINDCAVE_API_USERNAME"];
+var windcaveApiKey = builder.Configuration["WINDCAVE_API_KEY"];
+var windcaveApiBase = builder.Configuration["WINDCAVE_API_BASE"];
 var demoAuthEnabled = string.Equals(builder.Configuration["DEMO_AUTH_ENABLED"], "true", StringComparison.OrdinalIgnoreCase);
 var seedDemoAccounts = string.Equals(builder.Configuration["SEED_DEMO_ACCOUNTS"], "true", StringComparison.OrdinalIgnoreCase);
 var demoPassword = demoAuthEnabled ? (builder.Configuration["DEMO_AUTH_PASSWORD"] ?? "FijiLawDemo2026!") : null;
@@ -43,11 +47,19 @@ else
     builder.Services.AddSingleton(_ => new PostgresMembershipSecurityStore(databaseUrl));
     builder.Services.AddSingleton(_ => new PostgresCreditWalletStore(databaseUrl));
     builder.Services.AddSingleton<ICreditWalletStore>(sp => sp.GetRequiredService<PostgresCreditWalletStore>());
+    builder.Services.AddSingleton(_ => new PostgresCreditPaymentStore(databaseUrl));
     builder.Services.AddSingleton(sp => new PostgresDemoAccountSeeder(databaseUrl, sp.GetRequiredService<PostgresMembershipAuthStore>()));
 }
 
 builder.Services.AddSingleton(new DemoMembershipAuthStore(string.IsNullOrWhiteSpace(databaseUrl) ? demoPassword : null));
 builder.Services.AddSingleton(_ => new ResendEmailSender(new HttpClient { Timeout = TimeSpan.FromSeconds(20) }, resendApiKey, emailFrom, publicWebUrl));
+builder.Services.AddSingleton(_ => new WindcavePaymentGateway(
+    new HttpClient { Timeout = TimeSpan.FromSeconds(30) },
+    windcaveUsername,
+    windcaveApiKey,
+    windcaveApiBase,
+    publicApiUrl,
+    publicWebUrl));
 
 if (string.IsNullOrWhiteSpace(openAiApiKey)) builder.Services.AddSingleton<ILanguageModelProvider, DisabledLanguageModelProvider>();
 else builder.Services.AddSingleton<ILanguageModelProvider>(_ => new OpenAIResponsesProvider(new HttpClient { Timeout = TimeSpan.FromSeconds(45) }, openAiApiKey, openAiModel));
@@ -82,10 +94,11 @@ if (!string.IsNullOrWhiteSpace(databaseUrl))
     await scope.ServiceProvider.GetRequiredService<PostgresMembershipAuthStore>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresMembershipSecurityStore>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresCreditWalletStore>().EnsureCreatedAsync();
+    await scope.ServiceProvider.GetRequiredService<PostgresCreditPaymentStore>().EnsureCreatedAsync();
     if (seedDemoAccounts) await scope.ServiceProvider.GetRequiredService<PostgresDemoAccountSeeder>().EnsureSeededAsync();
 }
 
-app.MapGet("/health", (ILanguageModelProvider modelProvider, ResendEmailSender emailSender, DemoMembershipAuthStore demoAuth) => Results.Ok(new
+app.MapGet("/health", (ILanguageModelProvider modelProvider, ResendEmailSender emailSender, DemoMembershipAuthStore demoAuth, WindcavePaymentGateway payments) => Results.Ok(new
 {
     status = "ok",
     service = "FijiLaw.Api",
@@ -96,6 +109,7 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider, ResendEmailSender e
     membershipSecurity = !string.IsNullOrWhiteSpace(databaseUrl) ? "available" : demoAuth.IsEnabled ? "demo" : "awaiting-postgresql",
     creditWallet = !string.IsNullOrWhiteSpace(databaseUrl) ? "postgresql" : demoAuth.IsEnabled ? "demo-memory" : "unavailable",
     creditMetering = "enabled",
+    creditPayments = payments.IsConfigured ? "windcave-ready" : "awaiting-windcave-merchant-credentials",
     demoAccountsSeeded = !string.IsNullOrWhiteSpace(databaseUrl) && seedDemoAccounts,
     emailDelivery = emailSender.IsConfigured ? "configured" : "awaiting-resend-config",
     aiProvider = modelProvider.Name,
