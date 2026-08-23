@@ -91,19 +91,19 @@ public static class CreditEndpoints
                     message = "Redirect the customer to the hosted payment page. Credits are granted only after server-side payment verification."
                 });
             }
-            catch (Exception ex)
+            catch
             {
                 await paymentStore.MarkFailedAsync(order.Id, "failed", ct);
-                return Results.Problem($"Payment checkout could not be started: {ex.Message}", statusCode: 502);
+                return Results.Problem("Payment checkout could not be started. Please try again later.", statusCode: 502);
             }
-        });
+        }).RequireRateLimiting("payment");
 
         app.MapMethods("/api/credits/payment/notify", new[] { "GET", "POST" }, async (Guid orderId, HttpContext context, CancellationToken ct) =>
         {
             if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
             var outcome = await ProcessPaymentAsync(orderId, context, ct);
             return Results.Ok(outcome);
-        });
+        }).RequireRateLimiting("payment-notify");
 
         app.MapGet("/api/credits/payment/status/{orderId:guid}", async (Guid orderId, HttpRequest request, HttpContext context, CancellationToken ct) =>
         {
@@ -115,9 +115,9 @@ public static class CreditEndpoints
             if (order is null) return Results.NotFound();
             if (order.UserId != member.UserId && !member.Roles.Contains(MembershipRoles.PlatformAdmin, StringComparer.OrdinalIgnoreCase)) return Results.Forbid();
             var outcome = await ProcessPaymentAsync(orderId, context, ct);
-            var wallet = await context.RequestServices.GetRequiredService<ICreditWalletStore>().GetWalletAsync(member.UserId, member.PlanCode, ct);
+            var wallet = await context.RequestServices.GetRequiredService<ICreditWalletStore>().GetWalletAsync(order.UserId, order.PlanCode, ct);
             return Results.Ok(new { outcome.status, outcome.completed, orderId, wallet });
-        });
+        }).RequireRateLimiting("payment");
 
         app.MapPost("/api/admin/credits/grant", async (AdminCreditGrantRequest body, HttpRequest request, HttpContext context, CancellationToken ct) =>
         {
@@ -218,6 +218,12 @@ public static class CreditEndpoints
             var providerReference = $"windcave:{verification.ProviderReference ?? order.ProviderSessionId ?? order.Id.ToString("N")}";
             var granted = await store.CompleteAndGrantAsync(order.Id, providerReference, ct);
             return (granted ? "completed" : "already-processed", granted);
+        }
+
+        if (verification.State.EndsWith("-mismatch", StringComparison.OrdinalIgnoreCase))
+        {
+            await store.MarkFailedAsync(order.Id, "verification_failed", ct);
+            return ("verification-failed", false);
         }
 
         if (string.Equals(verification.State, "complete", StringComparison.OrdinalIgnoreCase))
