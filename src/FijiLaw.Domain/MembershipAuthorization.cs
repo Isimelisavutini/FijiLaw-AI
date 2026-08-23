@@ -4,8 +4,8 @@ public static class MembershipAuthorization
 {
     public static AuthorizationDecision CanAccessDashboard(AuthenticatedMember member)
     {
-        if (!member.EmailVerified)
-            return AuthorizationDecision.Deny("Email verification is required.");
+        if (!member.IdentityVerified)
+            return AuthorizationDecision.Deny("Verified identity is required.");
 
         if (!member.Permissions.Contains(MembershipPermissions.DashboardAccess, StringComparer.OrdinalIgnoreCase))
             return AuthorizationDecision.Deny("Dashboard.Access entitlement is required.");
@@ -17,6 +17,9 @@ public static class MembershipAuthorization
     {
         if (string.IsNullOrWhiteSpace(permission))
             return AuthorizationDecision.Deny("A permission code is required.");
+
+        if (!member.IdentityVerified)
+            return AuthorizationDecision.Deny("Verified identity is required.");
 
         return member.Permissions.Contains(permission, StringComparer.OrdinalIgnoreCase)
             ? AuthorizationDecision.Allow()

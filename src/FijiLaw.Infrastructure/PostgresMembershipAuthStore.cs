@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 using FijiLaw.Domain;
 using Npgsql;
 
@@ -9,6 +11,7 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
     private const int Iterations = 210_000;
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromDays(30);
     private static readonly TimeSpan PasswordResetLifetime = TimeSpan.FromMinutes(30);
+    private static readonly Regex FijiPhonePattern = new(@"^\+679\d{7}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly HashSet<string> AllowedRequestedPlans = new(StringComparer.OrdinalIgnoreCase)
     {
         MembershipPlans.Free,
@@ -104,28 +107,169 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
-        const string roleSql = """
-            INSERT INTO user_roles (user_id, role_id)
-            SELECT @userId, id FROM roles WHERE code='citizen'
-            ON CONFLICT DO NOTHING;
+        await EnsureCitizenAccessAsync(connection, transaction, userId, ct);
+        var session = await CreateSessionAsync(connection, transaction, userId, email, request.DisplayName?.Trim(), null, false, ct);
+        await transaction.CommitAsync(ct);
+        return session;
+    }
+
+    /// <summary>
+    /// Creates or links a FijiLaw member after a trusted upstream identity provider has
+    /// completed verification. The API endpoint that calls this method is protected by
+    /// a server-to-server bridge secret; browsers must never call this method directly.
+    /// </summary>
+    public async Task<AuthSessionResult> CreateExternalIdentitySessionAsync(ExternalIdentitySessionRequest request, CancellationToken ct = default)
+    {
+        var provider = NormalizeIdentityProvider(request.IdentityProvider);
+        var subject = string.IsNullOrWhiteSpace(request.IdentitySubject)
+            ? throw new ArgumentException("A verified identity subject is required.")
+            : request.IdentitySubject.Trim();
+        var email = string.IsNullOrWhiteSpace(request.Email) ? null : NormalizeEmail(request.Email);
+        var phone = string.IsNullOrWhiteSpace(request.PhoneNumber) ? null : NormalizeFijiPhone(request.PhoneNumber);
+        var requestedPlan = NormalizeRequestedPlan(request.RequestedPlanCode);
+        var displayName = string.IsNullOrWhiteSpace(request.DisplayName) ? null : request.DisplayName.Trim();
+
+        if (!request.EmailVerified && !request.PhoneVerified)
+            throw new ArgumentException("The upstream identity must verify an email address or Fiji mobile number.");
+        if (request.EmailVerified && email is null)
+            throw new ArgumentException("A verified email address is required.");
+        if (request.PhoneVerified && phone is null)
+            throw new ArgumentException("A verified Fiji mobile number is required.");
+        if (provider == "phone" && !request.PhoneVerified)
+            throw new ArgumentException("Phone registration requires a verified Fiji mobile number.");
+        if (provider is "google" or "apple" && !request.EmailVerified)
+            throw new ArgumentException("Google and Apple registration require a verified email address.");
+
+        await using var connection = new NpgsqlConnection(connectionString);
+        await connection.OpenAsync(ct);
+        await using var transaction = await connection.BeginTransactionAsync(ct);
+
+        Guid? userId = null;
+        string? storedEmail = null;
+        string? storedDisplayName = null;
+        string? storedPhone = null;
+
+        const string identitySql = """
+            SELECT id,email,display_name,phone_number
+            FROM app_users
+            WHERE identity_provider=@provider AND identity_subject=@subject AND status='active'
+            LIMIT 1
+            FOR UPDATE;
             """;
-        await using (var cmd = new NpgsqlCommand(roleSql, connection, transaction))
+        await using (var identity = new NpgsqlCommand(identitySql, connection, transaction))
         {
-            cmd.Parameters.AddWithValue("userId", userId);
-            await cmd.ExecuteNonQueryAsync(ct);
+            identity.Parameters.AddWithValue("provider", provider);
+            identity.Parameters.AddWithValue("subject", subject);
+            await using var reader = await identity.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                userId = reader.GetGuid(0);
+                storedEmail = reader.GetString(1);
+                storedDisplayName = reader.IsDBNull(2) ? null : reader.GetString(2);
+                storedPhone = reader.IsDBNull(3) ? null : reader.GetString(3);
+            }
         }
 
-        const string freeSubscriptionSql = """
-            INSERT INTO subscriptions (user_id,plan_id,status,billing_interval,started_at)
-            SELECT @userId,id,'active','free',NOW() FROM subscription_plans WHERE code='free';
-            """;
-        await using (var cmd = new NpgsqlCommand(freeSubscriptionSql, connection, transaction))
+        if (userId is null && email is not null && request.EmailVerified)
         {
-            cmd.Parameters.AddWithValue("userId", userId);
-            await cmd.ExecuteNonQueryAsync(ct);
+            const string emailSql = "SELECT id,email,display_name,phone_number FROM app_users WHERE email=@email AND status='active' LIMIT 1 FOR UPDATE;";
+            await using var byEmail = new NpgsqlCommand(emailSql, connection, transaction);
+            byEmail.Parameters.AddWithValue("email", email);
+            await using var reader = await byEmail.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                userId = reader.GetGuid(0);
+                storedEmail = reader.GetString(1);
+                storedDisplayName = reader.IsDBNull(2) ? null : reader.GetString(2);
+                storedPhone = reader.IsDBNull(3) ? null : reader.GetString(3);
+            }
         }
 
-        var session = await CreateSessionAsync(connection, transaction, userId, email, request.DisplayName?.Trim(), ct);
+        if (userId is null && phone is not null && request.PhoneVerified)
+        {
+            const string phoneSql = "SELECT id,email,display_name,phone_number FROM app_users WHERE phone_number=@phone AND status='active' LIMIT 1 FOR UPDATE;";
+            await using var byPhone = new NpgsqlCommand(phoneSql, connection, transaction);
+            byPhone.Parameters.AddWithValue("phone", phone);
+            await using var reader = await byPhone.ExecuteReaderAsync(ct);
+            if (await reader.ReadAsync(ct))
+            {
+                userId = reader.GetGuid(0);
+                storedEmail = reader.GetString(1);
+                storedDisplayName = reader.IsDBNull(2) ? null : reader.GetString(2);
+                storedPhone = reader.IsDBNull(3) ? null : reader.GetString(3);
+            }
+        }
+
+        if (userId is null)
+        {
+            userId = Guid.NewGuid();
+            storedEmail = email ?? CreatePhoneIdentityAlias(phone!);
+            storedDisplayName = displayName;
+            storedPhone = phone;
+
+            const string createSql = """
+                INSERT INTO app_users
+                  (id,email,display_name,identity_provider,identity_subject,phone_number,requested_plan_code,email_verified,phone_verified,identity_verified_at,status)
+                VALUES
+                  (@id,@email,@displayName,@provider,@subject,@phone,@requestedPlan,@emailVerified,@phoneVerified,NOW(),'active');
+                """;
+            await using var create = new NpgsqlCommand(createSql, connection, transaction);
+            create.Parameters.AddWithValue("id", userId.Value);
+            create.Parameters.AddWithValue("email", storedEmail);
+            create.Parameters.AddWithValue("displayName", (object?)displayName ?? DBNull.Value);
+            create.Parameters.AddWithValue("provider", provider);
+            create.Parameters.AddWithValue("subject", subject);
+            create.Parameters.AddWithValue("phone", (object?)phone ?? DBNull.Value);
+            create.Parameters.AddWithValue("requestedPlan", (object?)requestedPlan ?? DBNull.Value);
+            create.Parameters.AddWithValue("emailVerified", request.EmailVerified);
+            create.Parameters.AddWithValue("phoneVerified", request.PhoneVerified);
+            try { await create.ExecuteNonQueryAsync(ct); }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+            {
+                throw new ArgumentException("This verified identity is already linked to another FijiLaw account.");
+            }
+        }
+        else
+        {
+            var effectiveEmail = email ?? storedEmail!;
+            var effectiveName = displayName ?? storedDisplayName;
+            var effectivePhone = phone ?? storedPhone;
+            const string updateSql = """
+                UPDATE app_users
+                SET email=@email,
+                    display_name=COALESCE(@displayName,display_name),
+                    identity_provider=@provider,
+                    identity_subject=@subject,
+                    phone_number=COALESCE(@phone,phone_number),
+                    requested_plan_code=COALESCE(@requestedPlan,requested_plan_code),
+                    email_verified=email_verified OR @emailVerified,
+                    phone_verified=phone_verified OR @phoneVerified,
+                    identity_verified_at=COALESCE(identity_verified_at,NOW()),
+                    updated_at=NOW()
+                WHERE id=@id;
+                """;
+            await using var update = new NpgsqlCommand(updateSql, connection, transaction);
+            update.Parameters.AddWithValue("id", userId.Value);
+            update.Parameters.AddWithValue("email", effectiveEmail);
+            update.Parameters.AddWithValue("displayName", (object?)effectiveName ?? DBNull.Value);
+            update.Parameters.AddWithValue("provider", provider);
+            update.Parameters.AddWithValue("subject", subject);
+            update.Parameters.AddWithValue("phone", (object?)effectivePhone ?? DBNull.Value);
+            update.Parameters.AddWithValue("requestedPlan", (object?)requestedPlan ?? DBNull.Value);
+            update.Parameters.AddWithValue("emailVerified", request.EmailVerified);
+            update.Parameters.AddWithValue("phoneVerified", request.PhoneVerified);
+            try { await update.ExecuteNonQueryAsync(ct); }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+            {
+                throw new ArgumentException("This verified identity is already linked to another FijiLaw account.");
+            }
+            storedEmail = effectiveEmail;
+            storedDisplayName = effectiveName;
+            storedPhone = effectivePhone;
+        }
+
+        await EnsureCitizenAccessAsync(connection, transaction, userId.Value, ct);
+        var session = await CreateSessionAsync(connection, transaction, userId.Value, storedEmail!, storedDisplayName, storedPhone, true, ct);
         await transaction.CommitAsync(ct);
         return session;
     }
@@ -137,7 +281,8 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
         await connection.OpenAsync(ct);
 
         const string sql = """
-            SELECT u.id,u.display_name,c.password_salt,c.password_hash,c.iterations
+            SELECT u.id,u.display_name,c.password_salt,c.password_hash,c.iterations,u.phone_number,
+                   (u.email_verified OR u.phone_verified OR u.identity_verified_at IS NOT NULL) AS identity_verified
             FROM app_users u
             JOIN user_credentials c ON c.user_id=u.id
             WHERE u.email=@email AND u.status='active';
@@ -152,13 +297,15 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
         var salt = (byte[])reader[2];
         var expectedHash = (byte[])reader[3];
         var iterations = reader.GetInt32(4);
+        var phone = reader.IsDBNull(5) ? null : reader.GetString(5);
+        var identityVerified = reader.GetBoolean(6);
         var actualHash = HashPassword(request.Password, salt, iterations);
         if (!CryptographicOperations.FixedTimeEquals(actualHash, expectedHash))
             throw new UnauthorizedAccessException("Invalid email or password.");
         await reader.DisposeAsync();
 
         await using var transaction = await connection.BeginTransactionAsync(ct);
-        var session = await CreateSessionAsync(connection, transaction, userId, email, displayName, ct);
+        var session = await CreateSessionAsync(connection, transaction, userId, email, displayName, phone, identityVerified, ct);
         await transaction.CommitAsync(ct);
         return session;
     }
@@ -205,7 +352,6 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
         ValidatePassword(newPassword);
-
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(ct);
         await using var transaction = await connection.BeginTransactionAsync(ct);
@@ -282,7 +428,40 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    private static async Task<AuthSessionResult> CreateSessionAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid userId, string email, string? displayName, CancellationToken ct)
+    private static async Task EnsureCitizenAccessAsync(NpgsqlConnection connection, NpgsqlTransaction transaction, Guid userId, CancellationToken ct)
+    {
+        const string roleSql = """
+            INSERT INTO user_roles (user_id, role_id)
+            SELECT @userId, id FROM roles WHERE code='citizen'
+            ON CONFLICT DO NOTHING;
+            """;
+        await using (var cmd = new NpgsqlCommand(roleSql, connection, transaction))
+        {
+            cmd.Parameters.AddWithValue("userId", userId);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        const string freeSubscriptionSql = """
+            INSERT INTO subscriptions (user_id,plan_id,status,billing_interval,started_at)
+            SELECT @userId,id,'active','free',NOW()
+            FROM subscription_plans
+            WHERE code='free'
+              AND NOT EXISTS (SELECT 1 FROM subscriptions WHERE user_id=@userId);
+            """;
+        await using var subscription = new NpgsqlCommand(freeSubscriptionSql, connection, transaction);
+        subscription.Parameters.AddWithValue("userId", userId);
+        await subscription.ExecuteNonQueryAsync(ct);
+    }
+
+    private static async Task<AuthSessionResult> CreateSessionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid userId,
+        string email,
+        string? displayName,
+        string? phoneNumber,
+        bool identityVerified,
+        CancellationToken ct)
     {
         var rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         var expiresAt = DateTimeOffset.UtcNow.Add(SessionLifetime);
@@ -292,13 +471,42 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
         cmd.Parameters.AddWithValue("hash", HashToken(rawToken));
         cmd.Parameters.AddWithValue("expiresAt", expiresAt);
         await cmd.ExecuteNonQueryAsync(ct);
-        return new AuthSessionResult(rawToken, expiresAt, userId, email, displayName);
+        return new AuthSessionResult(rawToken, expiresAt, userId, email, displayName, phoneNumber, identityVerified);
     }
 
     private static string NormalizeEmail(string email)
     {
         if (string.IsNullOrWhiteSpace(email) || !email.Contains('@')) throw new ArgumentException("A valid email is required.");
         return email.Trim().ToLowerInvariant();
+    }
+
+    private static string NormalizeFijiPhone(string phone)
+    {
+        var normalized = phone.Trim().Replace(" ", string.Empty).Replace("-", string.Empty).Replace("(", string.Empty).Replace(")", string.Empty);
+        if (normalized.StartsWith("679", StringComparison.Ordinal)) normalized = "+" + normalized;
+        if (Regex.IsMatch(normalized, @"^\d{7}$", RegexOptions.CultureInvariant)) normalized = "+679" + normalized;
+        if (!FijiPhonePattern.IsMatch(normalized))
+            throw new ArgumentException("A Fiji mobile number must use +679 followed by the seven-digit national number.");
+        return normalized;
+    }
+
+    private static string NormalizeIdentityProvider(string provider)
+    {
+        var value = provider?.Trim().ToLowerInvariant() ?? string.Empty;
+        return value switch
+        {
+            "google" or "oauth_google" or "clerk_google" => "google",
+            "apple" or "oauth_apple" or "clerk_apple" => "apple",
+            "phone" or "clerk_phone" or "phone_otp" => "phone",
+            "email" or "clerk_email" or "email_otp" => "email_otp",
+            _ => throw new ArgumentException("Unsupported identity provider.")
+        };
+    }
+
+    private static string CreatePhoneIdentityAlias(string phone)
+    {
+        var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(phone))).ToLowerInvariant();
+        return $"phone-{digest[..24]}@identity.fijilaw.local";
     }
 
     private static string? NormalizeRequestedPlan(string? requestedPlanCode)
@@ -319,5 +527,5 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
         Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, 32);
 
     private static string HashToken(string token) =>
-        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 }

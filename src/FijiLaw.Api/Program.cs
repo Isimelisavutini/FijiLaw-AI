@@ -9,6 +9,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 var databaseUrl = builder.Configuration["DATABASE_URL"];
 var adminApiKey = builder.Configuration["ADMIN_API_KEY"];
+var authBridgeSecret = builder.Configuration["AUTH_BRIDGE_SECRET"];
 var openAiApiKey = builder.Configuration["OPENAI_API_KEY"];
 var openAiModel = builder.Configuration["OPENAI_MODEL"] ?? "gpt-5.6-luna";
 var resendApiKey = builder.Configuration["RESEND_API_KEY"];
@@ -109,6 +110,7 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider, ResendEmailSender e
     membershipStorage = !string.IsNullOrWhiteSpace(databaseUrl) ? "postgresql" : demoAuth.IsEnabled ? "demo-memory" : "configuration-fallback",
     membershipAuth = !string.IsNullOrWhiteSpace(databaseUrl) ? "available" : demoAuth.IsEnabled ? "demo" : "awaiting-postgresql",
     membershipSecurity = !string.IsNullOrWhiteSpace(databaseUrl) ? "available" : demoAuth.IsEnabled ? "demo" : "awaiting-postgresql",
+    verifiedIdentityBridge = !string.IsNullOrWhiteSpace(authBridgeSecret) ? "configured" : "awaiting-auth-bridge-secret",
     creditWallet = !string.IsNullOrWhiteSpace(databaseUrl) ? "postgresql" : demoAuth.IsEnabled ? "demo-memory" : "unavailable",
     creditMetering = "enabled",
     creditPayments = payments.IsConfigured ? "windcave-ready" : "awaiting-windcave-merchant-credentials",
@@ -143,7 +145,7 @@ app.MapGet("/api/membership/plans", async (HttpContext context, CancellationToke
     return Results.Ok(new { items = fallback, source = "configuration-fallback" });
 });
 
-app.MapMembershipEndpoints(databaseUrl);
+app.MapMembershipEndpoints(databaseUrl, authBridgeSecret);
 app.MapCreditEndpoints(databaseUrl);
 app.MapGet("/api/legal-services", (string? city, string? type, string? area, string? q, LegalServicesDirectory directory) => Results.Ok(new { items = directory.Search(city, type, area, q), cities = directory.Cities() }));
 
