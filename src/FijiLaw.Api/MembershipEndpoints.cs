@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.RateLimiting;
 using FijiLaw.Domain;
 using FijiLaw.Infrastructure;
@@ -6,7 +8,7 @@ namespace FijiLaw.Api;
 
 public static class MembershipEndpoints
 {
-    public static WebApplication MapMembershipEndpoints(this WebApplication app, string? databaseUrl)
+    public static WebApplication MapMembershipEndpoints(this WebApplication app, string? databaseUrl, string? authBridgeSecret)
     {
         app.MapPost("/api/auth/register", async (RegisterRequest request, HttpContext context, CancellationToken ct) =>
         {
@@ -23,6 +25,27 @@ public static class MembershipEndpoints
                 var result = await store.RegisterAsync(request, ct);
                 var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
                 await security.RecordAuditAsync(result.UserId, result.UserId, "member_registered", $"Member account created; requested plan '{request.RequestedPlanCode ?? MembershipPlans.Free}'.", ct);
+                return Results.Ok(result);
+            }
+            catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+        }).RequireRateLimiting("auth");
+
+        app.MapPost("/api/auth/external-session", async (ExternalIdentitySessionRequest request, HttpRequest httpRequest, HttpContext context, CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(databaseUrl))
+                return Results.Problem("Verified identity registration is not available until PostgreSQL is connected.", statusCode: 503);
+            if (string.IsNullOrWhiteSpace(authBridgeSecret))
+                return Results.Problem("The verified identity bridge is not configured.", statusCode: 503);
+            if (!httpRequest.Headers.TryGetValue("X-Auth-Bridge-Secret", out var suppliedSecret) || !SecretMatches(authBridgeSecret, suppliedSecret.ToString()))
+                return Results.Unauthorized();
+
+            try
+            {
+                var store = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
+                var result = await store.CreateExternalIdentitySessionAsync(request, ct);
+                var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
+                var identifierType = request.PhoneVerified ? "phone" : "email";
+                await security.RecordAuditAsync(result.UserId, result.UserId, "verified_identity_session", $"Verified {request.IdentityProvider} identity linked using {identifierType} verification.", ct);
                 return Results.Ok(result);
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -111,7 +134,7 @@ public static class MembershipEndpoints
         {
             var member = await ResolveMemberAsync(request, context, databaseUrl, ct);
             if (member is null) return Results.Unauthorized();
-            if (member.EmailVerified) return Results.Ok(new { message = "Email is already verified.", deliveryConfigured = true, deliveryAccepted = true, alreadyVerified = true });
+            if (member.IdentityVerified) return Results.Ok(new { message = "Identity is already verified.", deliveryConfigured = true, deliveryAccepted = true, alreadyVerified = true });
             if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Email verification is not required for controlled demo accounts.", statusCode: 503);
 
             var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
@@ -160,7 +183,7 @@ public static class MembershipEndpoints
                 return Results.Json(new { error = decision.Reason, planCode = member.PlanCode }, statusCode: 403);
 
             return Results.Ok(new DashboardSummary(member.UserId, member.Email, member.DisplayName, member.PlanCode,
-                member.SubscriptionStatus, member.Roles, member.Permissions, true));
+                member.SubscriptionStatus, member.Roles, member.Permissions, true, member.PhoneNumber, member.IdentityVerified));
         });
 
         app.MapGet("/api/authz/{permission}", async (string permission, HttpRequest request, HttpContext context, CancellationToken ct) =>
@@ -202,19 +225,31 @@ public static class MembershipEndpoints
 
         await using var connection = new Npgsql.NpgsqlConnection(databaseUrl);
         await connection.OpenAsync(ct);
-        await using var command = new Npgsql.NpgsqlCommand("SELECT email,display_name,email_verified FROM app_users WHERE id=@id AND status='active'", connection);
+        await using var command = new Npgsql.NpgsqlCommand("SELECT email,display_name,email_verified,phone_number,phone_verified,identity_verified_at FROM app_users WHERE id=@id AND status='active'", connection);
         command.Parameters.AddWithValue("id", userId.Value);
         await using var reader = await command.ExecuteReaderAsync(ct);
         if (!await reader.ReadAsync(ct)) return null;
         var email = reader.GetString(0);
         var displayName = reader.IsDBNull(1) ? null : reader.GetString(1);
         var emailVerified = reader.GetBoolean(2);
-        return new AuthenticatedMember(userId.Value, email, displayName, emailVerified, access.Roles, access.Permissions, access.PlanCode, access.SubscriptionStatus, access.CurrentPeriodEnd);
+        var phoneNumber = reader.IsDBNull(3) ? null : reader.GetString(3);
+        var phoneVerified = reader.GetBoolean(4);
+        var identityVerifiedAt = reader.IsDBNull(5) ? null : reader.GetFieldValue<DateTimeOffset>(5);
+        return new AuthenticatedMember(userId.Value, email, displayName, emailVerified, access.Roles, access.Permissions, access.PlanCode, access.SubscriptionStatus, access.CurrentPeriodEnd,
+            phoneNumber, phoneVerified, identityVerifiedAt);
     }
 
     private static string? GetBearerToken(HttpRequest request)
     {
         var header = request.Headers.Authorization.ToString();
         return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? header[7..].Trim() : null;
+    }
+
+    private static bool SecretMatches(string expected, string supplied)
+    {
+        if (string.IsNullOrWhiteSpace(supplied)) return false;
+        var expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(expected));
+        var suppliedHash = SHA256.HashData(Encoding.UTF8.GetBytes(supplied));
+        return CryptographicOperations.FixedTimeEquals(expectedHash, suppliedHash);
     }
 }
