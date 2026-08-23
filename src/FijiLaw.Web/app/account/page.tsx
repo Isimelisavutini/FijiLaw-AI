@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { API_BASE, fetchWithTimeout, readApiError, SERVICE_UNAVAILABLE_MESSAGE } from '../../lib/api';
 
-type MembershipHealth = 'checking' | 'ready' | 'unavailable';
+type MembershipHealth = 'checking' | 'ready' | 'demo' | 'unavailable';
 
 export default function AccountPage() {
   const [mode,setMode]=useState<'login'|'register'>('login');
@@ -27,11 +27,17 @@ export default function AccountPage() {
       const response=await fetchWithTimeout(`${API_BASE}/health`,{cache:'no-store'},8000);
       if(!response.ok){setMembershipHealth('unavailable');return;}
       const body=await response.json();
-      setMembershipHealth(body?.membershipAuth==='available'?'ready':'unavailable');
+      if(body?.membershipAuth==='available') setMembershipHealth('ready');
+      else if(body?.membershipAuth==='demo') setMembershipHealth('demo');
+      else setMembershipHealth('unavailable');
     }catch{setMembershipHealth('unavailable');}
   }
 
   async function requestVerification(){
+    if(membershipHealth==='demo'){
+      setMessage('Temporary demo accounts are already treated as verified for dashboard testing.');
+      return;
+    }
     if(membershipHealth!=='ready'){
       setMessage('Email verification is unavailable until the secure membership database is connected.');
       return;
@@ -53,7 +59,11 @@ export default function AccountPage() {
 
   async function submit(e:FormEvent){
     e.preventDefault();
-    if(membershipHealth!=='ready'){
+    if(membershipHealth==='demo'&&mode==='register'){
+      setMessage('Registration is disabled in temporary demo mode. Use one of the administrator-provided test accounts to review each dashboard level.');
+      return;
+    }
+    if(membershipHealth==='unavailable'||membershipHealth==='checking'){
       setMessage('Secure member registration and sign-in are temporarily unavailable while account storage is being prepared. Public legal help and pricing remain available.');
       return;
     }
@@ -81,7 +91,8 @@ export default function AccountPage() {
   }
 
   const unavailable=membershipHealth==='unavailable';
-  const actionDisabled=loading||membershipHealth!=='ready';
+  const demo=membershipHealth==='demo';
+  const actionDisabled=loading||membershipHealth==='checking'||unavailable||(demo&&mode==='register');
 
   return <main style={{maxWidth:760,margin:'0 auto',padding:'54px 24px 80px',fontFamily:'Inter,system-ui,sans-serif',color:'#16231c'}}>
     <div style={{display:'flex',justifyContent:'space-between',gap:16,alignItems:'center'}}><a href="/" style={{color:'#173f2b',fontWeight:800,textDecoration:'none'}}>FijiLaw AI</a><a href="/pricing" style={{color:'#173f2b',fontWeight:800,textDecoration:'none'}}>View Pricing</a></div>
@@ -91,6 +102,7 @@ export default function AccountPage() {
 
     {membershipHealth==='checking'&&<section role="status" style={statusBox}><strong>Checking secure member service…</strong><p style={statusText}>FijiLaw AI is confirming that protected account storage is available before accepting credentials.</p></section>}
     {unavailable&&<section role="status" style={warningBox}><strong>Member accounts are temporarily unavailable.</strong><p style={statusText}>The secure membership database is not connected yet, so FijiLaw AI will not accept registration or sign-in credentials. You can continue using public legal tools and review pricing.</p><button type="button" onClick={()=>void checkMembershipService()} style={retryButton}>Retry member service</button></section>}
+    {demo&&<section role="status" style={demoBox}><strong>Dashboard testing mode is active.</strong><p style={statusText}>You can sign in with administrator-provided demo accounts to review Free, Personal Plus, Lawyer, Law Firm, Institutional and Administrator experiences. Registration and password recovery remain disabled until persistent PostgreSQL storage is connected.</p></section>}
 
     {mode==='register'&&!registered&&<section style={{background:'#f4f7f4',border:'1px solid #d5ddd7',borderRadius:14,padding:18,margin:'22px 0'}}><strong>Review pricing before registering.</strong><p style={{margin:'6px 0 12px',color:'#5b695f',lineHeight:1.55}}>You can create a free account, or choose a paid membership for dashboard access. Creating an account does not automatically charge you.</p>{selectedPlan?<p style={{margin:'0 0 12px',fontSize:13}}><strong>Selected plan:</strong> {selectedPlan.replaceAll('_',' ')}</p>:null}<a href="/pricing" style={{color:'#173f2b',fontWeight:800}}>Compare membership plans →</a></section>}
 
@@ -98,20 +110,16 @@ export default function AccountPage() {
       <h2 style={{fontFamily:'Georgia,serif',fontWeight:500,fontSize:30,marginTop:0}}>Verify your email before using paid features.</h2>
       <p style={{lineHeight:1.7,color:'#53635a'}}>{message}</p>
       {selectedPlan&&<p style={{lineHeight:1.6,color:'#53635a'}}>Your selected plan is <strong>{selectedPlan.replaceAll('_',' ')}</strong>. This preference has been recorded, but subscription activation occurs only after a completed payment flow.</p>}
-      <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:20}}>
-        <button onClick={()=>void requestVerification()} style={{...primary,width:'auto'}}>Request verification again</button>
-        <a href="/dashboard" style={linkButton}>Continue to dashboard</a>
-        <a href="/pricing" style={linkButton}>View membership plans</a>
-      </div>
+      <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:20}}><button onClick={()=>void requestVerification()} style={{...primary,width:'auto'}}>Request verification again</button><a href="/dashboard" style={linkButton}>Continue to dashboard</a><a href="/pricing" style={linkButton}>View membership plans</a></div>
     </section> : <>
       <div style={{display:'flex',gap:8,margin:'28px 0'}}><button type="button" onClick={()=>setMode('login')} style={tab(mode==='login')}>Sign in</button><button type="button" onClick={()=>setMode('register')} style={tab(mode==='register')}>Register</button></div>
       <form onSubmit={submit} style={{background:'#fff',border:'1px solid #d5ddd7',borderRadius:18,padding:28}}>
         {mode==='register'&&<><label style={label}>Name</label><input style={input} value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Your name" autoComplete="name" disabled={unavailable}/></>}
         <label style={label}>Email</label><input style={input} type="email" required value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoComplete="email" disabled={unavailable}/>
         <label style={label}>Password</label><input style={input} type="password" required minLength={10} value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 10 characters" autoComplete={mode==='login'?'current-password':'new-password'} disabled={unavailable}/>
-        {mode==='login'&&<div style={{textAlign:'right',margin:'2px 0 14px'}}><a href="/forgot-password" style={{color:'#173f2b',fontSize:13,fontWeight:800}}>Forgot password?</a></div>}
+        {mode==='login'&&!demo&&<div style={{textAlign:'right',margin:'2px 0 14px'}}><a href="/forgot-password" style={{color:'#173f2b',fontSize:13,fontWeight:800}}>Forgot password?</a></div>}
         {message&&<p role="alert" style={{background:'#fff0f0',padding:12,borderRadius:8,lineHeight:1.5}}>{message}</p>}
-        <button disabled={actionDisabled} style={{...primary,opacity:actionDisabled?0.58:1,cursor:actionDisabled?'not-allowed':'pointer'}}>{loading?'Please wait…':membershipHealth==='checking'?'Checking member service…':unavailable?'Member service unavailable':mode==='login'?'Sign in':'Create account'}</button>
+        <button disabled={actionDisabled} style={{...primary,opacity:actionDisabled?0.58:1,cursor:actionDisabled?'not-allowed':'pointer'}}>{loading?'Please wait…':membershipHealth==='checking'?'Checking member service…':unavailable?'Member service unavailable':demo&&mode==='register'?'Registration awaiting database':mode==='login'?'Sign in':'Create account'}</button>
       </form>
     </>}
     <p style={{fontSize:13,color:'#6a776f',marginTop:18}}>Passwords are never stored in plain text. Paid dashboard access is enforced by the API, not only by the browser.</p>
@@ -124,6 +132,7 @@ const primary={width:'100%',border:0,borderRadius:10,padding:14,background:'#173
 const linkButton={display:'inline-block',border:'1px solid #b8c4bc',borderRadius:10,padding:'12px 15px',color:'#173f2b',fontWeight:800,textDecoration:'none'} as const;
 const statusBox={background:'#f4f7f4',border:'1px solid #d5ddd7',borderRadius:12,padding:16,marginTop:20} as const;
 const warningBox={background:'#fff8e8',border:'1px solid #ead9ad',borderRadius:12,padding:16,marginTop:20,color:'#624f27'} as const;
+const demoBox={background:'#eef7f0',border:'1px solid #bcd8c5',borderRadius:12,padding:16,marginTop:20,color:'#254e35'} as const;
 const statusText={margin:'6px 0 0',lineHeight:1.55} as const;
 const retryButton={marginTop:12,border:'1px solid #ad9a68',background:'transparent',borderRadius:8,padding:'9px 12px',fontWeight:700,cursor:'pointer'} as const;
 function tab(active:boolean){return {border:'1px solid #b8c4bc',borderRadius:999,padding:'9px 14px',background:active?'#173f2b':'transparent',color:active?'#fff':'#173f2b',fontWeight:700,cursor:'pointer'} as const;}
