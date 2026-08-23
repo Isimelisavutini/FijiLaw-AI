@@ -1,75 +1,69 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, fetchWithTimeout, readApiError, SERVICE_UNAVAILABLE_MESSAGE } from '../../lib/api';
+import styles from './dashboard.module.css';
 
-type Dashboard = { userId:string; email:string; displayName?:string; planCode:string; subscriptionStatus:string; roles:string[]; permissions:string[]; dashboardAccess:boolean; };
-type Member = { userId:string; email:string; displayName?:string; emailVerified:boolean; planCode:string; subscriptionStatus:string; roles:string[]; permissions:string[]; };
+type Dashboard={userId:string;email:string;displayName?:string;planCode:string;subscriptionStatus:string;roles:string[];permissions:string[];dashboardAccess:boolean};
+type Member={userId:string;email:string;displayName?:string;emailVerified:boolean;planCode:string;subscriptionStatus:string;roles:string[];permissions:string[]};
+type Audience='personal'|'lawyer'|'firm'|'institutional'|'admin';
+type NavItem={id:string;label:string;permission?:string};
 
-export default function DashboardPage(){
-  const [data,setData]=useState<Dashboard|null>(null); const [member,setMember]=useState<Member|null>(null);
-  const [error,setError]=useState(''); const [loading,setLoading]=useState(true); const [upgrade,setUpgrade]=useState(false); const [unverified,setUnverified]=useState(false);
+const NAV:Record<Audience,NavItem[]>={
+ personal:[{id:'overview',label:'Overview'},{id:'matters',label:'My Legal Matters',permission:'Cases.ViewOwn'},{id:'ai',label:'AI Legal Assistant'},{id:'documents',label:'Documents',permission:'Documents.Analyse'},{id:'referrals',label:'Referrals',permission:'Referrals.Request'},{id:'billing',label:'Billing',permission:'Billing.View'},{id:'account',label:'Account'}],
+ lawyer:[{id:'overview',label:'Overview'},{id:'enquiries',label:'Client Enquiries',permission:'Leads.View'},{id:'referrals',label:'Referrals',permission:'Referrals.Manage'},{id:'matters',label:'Matters',permission:'Cases.Manage'},{id:'research',label:'AI Legal Research'},{id:'documents',label:'Document Analysis',permission:'Documents.Analyse'},{id:'profile',label:'My Profile',permission:'LawyerProfile.Manage'},{id:'analytics',label:'Analytics',permission:'Analytics.View'},{id:'billing',label:'Billing',permission:'Billing.View'}],
+ firm:[{id:'overview',label:'Overview'},{id:'leads',label:'Lead Pipeline',permission:'Leads.View'},{id:'cases',label:'Cases',permission:'Cases.Manage'},{id:'documents',label:'Documents',permission:'Documents.Analyse'},{id:'referrals',label:'Referrals',permission:'Referrals.Manage'},{id:'firm',label:'Firm Profile',permission:'Firm.Manage'},{id:'team',label:'Team',permission:'FirmUsers.Manage'},{id:'analytics',label:'Analytics',permission:'Analytics.View'},{id:'billing',label:'Billing',permission:'Billing.View'}],
+ institutional:[{id:'overview',label:'Overview'},{id:'referrals',label:'Referrals'},{id:'offices',label:'Offices'},{id:'users',label:'Users'},{id:'analytics',label:'Regional Analytics'},{id:'reports',label:'Reports'}],
+ admin:[{id:'overview',label:'Platform Overview'},{id:'users',label:'Users'},{id:'memberships',label:'Memberships'},{id:'firms',label:'Law Firms'},{id:'verification',label:'Verification'},{id:'corpus',label:'Legal Corpus'},{id:'aiops',label:'AI Operations'},{id:'analytics',label:'Commercial Analytics',permission:'Analytics.View'},{id:'security',label:'Security & Audit'}]
+};
 
-  useEffect(()=>{ void load(); },[]);
-  async function load(){
-    const token=sessionStorage.getItem('fijilaw_access_token');
-    if(!token){window.location.href='/account?mode=login';return;}
-    try{
-      const meResponse=await fetchWithTimeout(`${API_BASE}/api/membership/me`,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'},12000);
-      if(meResponse.status===401){sessionStorage.removeItem('fijilaw_access_token');window.location.href='/account?mode=login';return;}
-      if(!meResponse.ok) throw new Error(await readApiError(meResponse,'Member profile could not be loaded.'));
-      const meBody=await meResponse.json();
-      setMember(meBody);
+const PLAN_NAME:Record<string,string>={free:'Free',personal_plus:'Personal Plus',lawyer_professional:'Lawyer Professional',firm_starter:'Law Firm Starter',firm_professional:'Law Firm Professional',firm_premium:'Law Firm Premium',institutional:'Institutional'};
 
-      const response=await fetchWithTimeout(`${API_BASE}/api/dashboard`,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'},12000);
-      if(response.status===401){sessionStorage.removeItem('fijilaw_access_token');window.location.href='/account?mode=login';return;}
-      if(response.status===403){
-        const body=await response.json().catch(()=>({}));
-        setUnverified(meBody.emailVerified===false && meBody.planCode!=='free');
-        setUpgrade(meBody.planCode==='free' || !meBody.permissions?.includes('Dashboard.Access'));
-        setError(body.error??'Your dashboard is currently locked.');
-        return;
-      }
-      if(!response.ok) throw new Error(await readApiError(response,'Dashboard could not be loaded.'));
-      setData(await response.json());
-    }catch(e){setError(e instanceof Error?e.message:SERVICE_UNAVAILABLE_MESSAGE);}
-    finally{setLoading(false);}
-  }
-
-  async function requestVerification(){
-    if(!member?.email)return;
-    try{
-      const response=await fetchWithTimeout(`${API_BASE}/api/auth/request-email-verification`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:member.email})},12000);
-      if(!response.ok) throw new Error(await readApiError(response,'Verification request could not be created.'));
-      const body=await response.json().catch(()=>({}));
-      setError(body.deliveryConfigured===false
-        ? 'Verification was prepared, but outbound verification email delivery is not enabled yet.'
-        : body.message??'Verification request created.');
-    }catch(e){setError(e instanceof Error?e.message:'Verification request could not be created.');}
-  }
-
-  async function logout(){
-    const token=sessionStorage.getItem('fijilaw_access_token');
-    if(token) await fetchWithTimeout(`${API_BASE}/api/auth/logout`,{method:'POST',headers:{Authorization:`Bearer ${token}`}},8000).catch(()=>{});
-    sessionStorage.clear(); window.location.href='/';
-  }
-
-  if(loading)return <main style={shell}><h1>Loading dashboard…</h1></main>;
-
-  if(unverified)return <main style={shell}><a href="/" style={brand}>FijiLaw AI</a><p style={eyebrow}>EMAIL VERIFICATION REQUIRED</p><h1 style={title}>Verify your email to unlock paid dashboard access.</h1><p style={lead}>{error}</p><div style={card}><h2>Why this is required</h2><p style={{lineHeight:1.7,color:'#53635a'}}>Paid legal workflows can contain sensitive information. FijiLaw AI requires a verified member email before enabling dashboard features for paid accounts.</p><button onClick={()=>void requestVerification()} style={ctaButton}>Request verification email</button><a href="/verify-email" style={{...cta,marginLeft:10}}>I have a verification token</a></div><button onClick={()=>void logout()} style={secondary}>Sign out</button></main>;
-
-  if(upgrade)return <main style={shell}><a href="/" style={brand}>FijiLaw AI</a><p style={eyebrow}>PAID MEMBER DASHBOARD</p><h1 style={title}>Unlock your FijiLaw Dashboard.</h1><p style={lead}>{error}</p><div style={card}><h2>Dashboard features</h2><ul style={{lineHeight:1.8}}><li>Saved legal matters and assessment history</li><li>Document analysis and storage entitlements</li><li>Referral tracking and saved lawyers</li><li>Member billing and plan controls</li></ul><a href="/pricing" style={cta}>View membership plans</a></div><button onClick={()=>void logout()} style={secondary}>Sign out</button></main>;
-  if(error)return <main style={shell}><a href="/" style={brand}>FijiLaw AI</a><p style={eyebrow}>MEMBER SERVICE</p><h1 style={title}>Dashboard unavailable.</h1><p style={lead}>{error}</p><div style={{display:'flex',gap:10,flexWrap:'wrap'}}><button onClick={()=>{setLoading(true);setError('');void load();}} style={secondary}>Retry</button><a href="/pricing" style={{...secondary,textDecoration:'none',color:'#16231c'}}>View plans</a></div></main>;
-
-  return <main style={shell}><div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:16}}><a href="/" style={brand}>FijiLaw AI</a><div style={{display:'flex',gap:10,alignItems:'center'}}><a href="/pricing" style={{...secondary,textDecoration:'none',color:'#16231c'}}>Plans</a><button onClick={()=>void logout()} style={secondary}>Sign out</button></div></div><p style={eyebrow}>MEMBER DASHBOARD</p><h1 style={title}>Welcome{data?.displayName?`, ${data.displayName}`:''}.</h1><p style={lead}>Your current plan is <strong>{data?.planCode.replaceAll('_',' ')}</strong>. Dashboard access is enforced from your active server-side subscription entitlements.</p><div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:14,marginTop:32}}><section style={card}><h3>My Legal Matters</h3><p>Saved case workflows will appear here.</p></section><section style={card}><h3>Documents</h3><p>Paid document analysis and storage controls.</p></section><section style={card}><h3>Referrals</h3><p>Track lawyer and Legal Aid referral activity.</p></section><section style={card}><h3>Membership</h3><p>{data?.subscriptionStatus} · {data?.planCode}</p><p style={{fontSize:13,color:'#66746b'}}>Email verified: {member?.emailVerified?'Yes':'No'}</p></section></div></main>;
+function audienceFor(data:Dashboard):Audience{
+ if(data.roles.includes('platform_admin'))return'admin';
+ if(data.roles.includes('institutional')||data.planCode==='institutional')return'institutional';
+ if(data.planCode.startsWith('firm_')||data.roles.some(x=>x==='firm_admin'||x==='firm_staff'))return'firm';
+ if(data.planCode==='lawyer_professional'||data.roles.includes('lawyer'))return'lawyer';
+ return'personal';
 }
 
-const shell={maxWidth:1100,margin:'0 auto',padding:'48px 24px 80px',fontFamily:'Inter,system-ui,sans-serif',color:'#16231c'} as const;
-const brand={fontWeight:800,color:'#16231c',textDecoration:'none',fontSize:21} as const;
-const eyebrow={letterSpacing:'.14em',fontSize:12,fontWeight:800,color:'#587063',marginTop:48} as const;
-const title={fontFamily:'Georgia,serif',fontWeight:500,fontSize:54,margin:'8px 0 14px'} as const;
-const lead={fontSize:18,lineHeight:1.6,color:'#58685e',maxWidth:760} as const;
-const card={background:'#fff',border:'1px solid #d5ddd7',borderRadius:18,padding:24} as const;
-const cta={display:'inline-block',background:'#173f2b',color:'#fff',padding:'12px 16px',borderRadius:10,textDecoration:'none',fontWeight:800,marginTop:10} as const;
-const ctaButton={border:0,background:'#173f2b',color:'#fff',padding:'12px 16px',borderRadius:10,fontWeight:800,cursor:'pointer'} as const;
-const secondary={border:'1px solid #b9c4bd',background:'transparent',borderRadius:10,padding:'10px 14px',fontWeight:700,cursor:'pointer'} as const;
+function overviewCopy(audience:Audience){
+ switch(audience){
+  case'lawyer':return['Lawyer workspace','Manage enquiries, referrals, matters and your professional presence from one workspace.'];
+  case'firm':return['Law firm workspace','Track legal enquiries, referrals, firm operations and the commercial performance of your FijiLaw presence.'];
+  case'institutional':return['Institutional workspace','Coordinate authorised legal-service workflows and monitor access-to-justice demand.'];
+  case'admin':return['FijiLaw control centre','Manage the platform, membership programme, legal corpus, AI operations and commercial performance.'];
+  default:return['My legal workspace','Continue legal matters, organise documents and track referrals in your paid FijiLaw workspace.'];
+ }
+}
+
+function kpisFor(audience:Audience){
+ if(audience==='lawyer')return[['New enquiries','—'],['Active matters','—'],['Referrals','—'],['Profile views','—']];
+ if(audience==='firm')return[['New leads','—'],['Active matters','—'],['Referrals','—'],['Profile views','—']];
+ if(audience==='institutional')return[['Open referrals','—'],['Service locations','—'],['Active users','—'],['Demand signals','—']];
+ if(audience==='admin')return[['Registered users','—'],['Paid members','—'],['MRR','FJD —'],['Active firms','—']];
+ return[['Active matters','—'],['Documents','—'],['Upcoming deadlines','—'],['Lawyer referrals','—']];
+}
+
+function moduleCards(audience:Audience,planCode:string){
+ const base=audience==='personal'?[['My Legal Matters','Saved case workflows and Advanced Legal Triage Reports.'],['Documents & Evidence','Analyse and organise legal documents for your matters.'],['Lawyers & Referrals','Track requests for professional legal assistance.'],['Deadlines','Procedural dates and reminders will appear here.']]
+ :audience==='lawyer'?[['Client Enquiries','Review incoming enquiries and FijiLaw triage summaries.'],['Referral Review','Accept, decline and manage referred matters.'],['AI Legal Research','Source-grounded Fiji legal research workspace.'],['Professional Profile','Manage practice areas, availability and profile details.']]
+ :audience==='firm'?[['Lead Pipeline','Move prospects from enquiry to consultation and matter opening.'],['Firm Matters','Coordinate cases and assigned practitioners.'],['Firm Profile','Manage listing, practice areas and firm visibility.'],['Team & Offices','Manage practitioners, staff and future office locations.']]
+ :audience==='institutional'?[['Referral Queue','Authorised referral and service workflows.'],['Offices & Users','Partner locations and access management.'],['Regional Demand','Aggregated legal demand and access trends.'],['Reports','Privacy-preserving institutional reporting.']]
+ :[['Memberships','Paid members, plans, conversions and churn.'],['Legal Corpus','Verified Fiji legal sources and ingestion status.'],['AI Operations','Model usage, retrieval quality and safety signals.'],['Security & Audit','Administrative actions, access and system controls.']];
+ return base.map(([title,description])=>({title,description,status:title==='Team & Offices'&&planCode==='firm_starter'?'Upgrade required':'Planned module'}));
+}
+
+export default function DashboardPage(){
+ const[data,setData]=useState<Dashboard|null>(null);const[member,setMember]=useState<Member|null>(null);const[error,setError]=useState('');const[loading,setLoading]=useState(true);const[upgrade,setUpgrade]=useState(false);const[unverified,setUnverified]=useState(false);const[section,setSection]=useState('overview');
+ useEffect(()=>{void load()},[]);
+ async function load(){const token=sessionStorage.getItem('fijilaw_access_token');if(!token){window.location.href='/account?mode=login';return;}try{const meResponse=await fetchWithTimeout(`${API_BASE}/api/membership/me`,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'},12000);if(meResponse.status===401){sessionStorage.removeItem('fijilaw_access_token');window.location.href='/account?mode=login';return;}if(!meResponse.ok)throw new Error(await readApiError(meResponse,'Member profile could not be loaded.'));const meBody=await meResponse.json();setMember(meBody);const response=await fetchWithTimeout(`${API_BASE}/api/dashboard`,{headers:{Authorization:`Bearer ${token}`},cache:'no-store'},12000);if(response.status===403){const body=await response.json().catch(()=>({}));setUnverified(meBody.emailVerified===false&&meBody.planCode!=='free');setUpgrade(meBody.planCode==='free'||!meBody.permissions?.includes('Dashboard.Access'));setError(body.error??'Your dashboard is currently locked.');return;}if(!response.ok)throw new Error(await readApiError(response,'Dashboard could not be loaded.'));setData(await response.json());}catch(e){setError(e instanceof Error?e.message:SERVICE_UNAVAILABLE_MESSAGE)}finally{setLoading(false)}}
+ async function requestVerification(){const token=sessionStorage.getItem('fijilaw_access_token');if(!token)return;try{const response=await fetchWithTimeout(`${API_BASE}/api/auth/request-email-verification`,{method:'POST',headers:{Authorization:`Bearer ${token}`}},12000);if(!response.ok)throw new Error(await readApiError(response,'Verification request could not be created.'));const body=await response.json().catch(()=>({}));setError(body.deliveryConfigured===false?'Verification was prepared, but outbound verification email delivery is not enabled yet.':body.message??'Verification request created.')}catch(e){setError(e instanceof Error?e.message:'Verification request could not be created.')}}
+ async function logout(){const token=sessionStorage.getItem('fijilaw_access_token');if(token)await fetchWithTimeout(`${API_BASE}/api/auth/logout`,{method:'POST',headers:{Authorization:`Bearer ${token}`}},8000).catch(()=>{});sessionStorage.clear();window.location.href='/'}
+ const audience=useMemo(()=>data?audienceFor(data):'personal',[data]);const nav=useMemo(()=>data?NAV[audience].filter(x=>!x.permission||data.permissions.includes(x.permission)):[],[data,audience]);
+ if(loading)return <main className={styles.lockedShell}><h1>Loading dashboard…</h1></main>;
+ if(unverified)return <main className={styles.lockedShell}><a href="/" className={styles.lockedBrand}>FijiLaw AI</a><p className={styles.eyebrow}>EMAIL VERIFICATION REQUIRED</p><h1 className={styles.lockedTitle}>Verify your email to unlock paid dashboard access.</h1><p className={styles.lockedLead}>{error}</p><div className={styles.lockedCard}><h2>Why this is required</h2><p>Paid legal workflows can contain sensitive information. FijiLaw AI requires a verified member email before enabling dashboard features.</p><button onClick={()=>void requestVerification()} className={styles.secondary}>Request verification email</button></div><button onClick={()=>void logout()} className={styles.secondary}>Sign out</button></main>;
+ if(upgrade)return <main className={styles.lockedShell}><a href="/" className={styles.lockedBrand}>FijiLaw AI</a><p className={styles.eyebrow}>PAID MEMBER DASHBOARD</p><h1 className={styles.lockedTitle}>Unlock your FijiLaw Dashboard.</h1><p className={styles.lockedLead}>{error}</p><div className={styles.previewGrid}><div className={styles.preview}><strong>My Legal Matters</strong><span>Save and continue cases.</span></div><div className={styles.preview}><strong>Documents</strong><span>Analyse and organise evidence.</span></div><div className={styles.preview}><strong>Referrals</strong><span>Track legal assistance requests.</span></div></div><a href="/pricing" className={styles.cta}>Compare membership plans</a></main>;
+ if(error||!data)return <main className={styles.lockedShell}><a href="/" className={styles.lockedBrand}>FijiLaw AI</a><h1 className={styles.lockedTitle}>Dashboard unavailable.</h1><p className={styles.lockedLead}>{error}</p><button onClick={()=>{setLoading(true);setError('');void load()}} className={styles.secondary}>Retry</button></main>;
+ const[heroTitle,heroText]=overviewCopy(audience);const cards=moduleCards(audience,data.planCode);return <main className={styles.page}><div className={styles.shell}><aside className={styles.sidebar}><a className={styles.brand} href="/">FijiLaw AI</a><div className={styles.identity}><strong>{data.displayName||data.email}</strong><span>{data.email}</span><span className={styles.planBadge}>{PLAN_NAME[data.planCode]??data.planCode}</span></div><nav className={styles.nav}>{nav.map(item=><button key={item.id} className={section===item.id?styles.active:''} onClick={()=>setSection(item.id)}>{item.label}</button>)}</nav><div className={styles.sideFooter}><a className={styles.sideLink} href="/pricing">Plans & pricing</a><button className={styles.signOut} onClick={()=>void logout()}>Sign out</button></div></aside><section className={styles.content}><header className={styles.topbar}><div><p className={styles.eyebrow}>{audience.toUpperCase()} DASHBOARD</p><h1>{nav.find(x=>x.id===section)?.label??'Overview'}</h1></div><div className={styles.topActions}><a href="/">Public site</a><a href="/pricing">Membership</a></div></header>{section==='overview'?<><section className={styles.hero}><div><p className={styles.eyebrow}>FIJILAW AI WORKSPACE</p><h2>{heroTitle}</h2><p>{heroText}</p></div><span className={styles.heroTag}>{data.subscriptionStatus} · {PLAN_NAME[data.planCode]??data.planCode}</span></section><div className={styles.kpis}>{kpisFor(audience).map(([label,value])=><div className={styles.kpi} key={label}><span>{label}</span><strong>{value}</strong></div>)}</div><div className={styles.grid}><div className={styles.card}><h3>Workspace modules</h3><p>These modules are shown from your role and server-issued permissions. Backing case, lead and analytics APIs will replace placeholders as each workplan item is completed.</p><div className={styles.moduleGrid}>{cards.map(card=><article className={styles.module} key={card.title}><h3>{card.title}</h3><p>{card.description}</p><span className={styles.status}>{card.status}</span></article>)}</div></div><div className={styles.stack}><div className={styles.card}><h3>Recent activity</h3><div className={styles.activity}><span>Dashboard access confirmed</span><small>Now</small></div><div className={styles.activity}><span>Plan: {PLAN_NAME[data.planCode]??data.planCode}</span><small>{data.subscriptionStatus}</small></div></div><div className={styles.card}><h3>Effective access</h3><div className={styles.permissions}>{data.permissions.map(x=><span key={x}>{x}</span>)}</div></div></div></div></>:<section className={styles.card}><h3>{nav.find(x=>x.id===section)?.label}</h3><p>This dashboard module shell is now wired to your access profile. Its persistent data/API workflow is the next implementation step in the dashboard workplan.</p><div className={styles.empty}>No live records yet.</div><div className={styles.quickActions}><a href="/">Open legal triage</a>{data.permissions.includes('Billing.View')&&<a href="/pricing">View plan</a>}</div></section>}</section></div></main>;
+}
