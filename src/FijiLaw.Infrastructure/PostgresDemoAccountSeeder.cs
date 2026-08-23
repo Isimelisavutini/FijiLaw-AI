@@ -7,6 +7,9 @@ public sealed class PostgresDemoAccountSeeder(string connectionString, PostgresM
 {
     private const string Password = "FijiLawDemo2026!";
 
+    public PostgresDemoAccountSeeder(string connectionString, PostgresMembershipAuthStore authStore)
+        : this(connectionString, authStore, new PostgresCreditWalletStore(connectionString)) { }
+
     private static readonly (string Email, string Name, string Role, string Plan)[] Accounts =
     {
         ("free@demo.fijilaw.ai", "Free Member Demo", MembershipRoles.Citizen, MembershipPlans.Free),
