@@ -1,7 +1,7 @@
 # FijiLaw Credits — Implementation & Deployment Status
 
 ## Status
-Core FijiLaw Credits metering and persistent wallet storage are implemented and deployed.
+Core FijiLaw Credits metering, persistent wallet storage, and Fiji-ready hosted payment checkout infrastructure are implemented. Live credit purchasing still requires merchant credentials from the selected Fiji-supported payment gateway.
 
 ## Completed
 - [x] FijiLaw Credits product terminology and commercial catalogue
@@ -26,8 +26,20 @@ Core FijiLaw Credits metering and persistent wallet storage are implemented and 
 - [x] Neon PostgreSQL connected to Railway production
 - [x] Persistent demo accounts seeded for each user/plan level
 - [x] Demo plan allowances verified in Neon
-- [x] Vercel frontend build succeeded
-- [x] Railway backend health deployment succeeded
+- [x] Persistent credit payment-order table
+- [x] Idempotent server-side purchased-credit grant path
+- [x] Windcave Hosted Payment Page adapter
+- [x] Server-side Windcave session verification before granting credits
+- [x] Hosted-payment return/status flow on `/credits`
+- [x] Vercel frontend build pipeline configured
+- [x] Railway backend health deployment pipeline configured
+
+## Fiji payment-provider decision
+Stripe is not currently listed as a directly supported merchant country for Fiji. FijiLaw therefore treats Stripe as an optional future provider for a supported overseas entity rather than the default Fiji merchant route.
+
+For a Fiji-based merchant, the primary implementation path is **Windcave Hosted Payment Page**, consistent with Westpac Fiji's Internet Payment Gateway offering. Mastercard Payment Gateway Services remains a possible second Fiji adapter.
+
+The Hosted Payment Page model keeps card capture on the payment provider's secure environment. FijiLaw stores only order/payment references and never receives raw card numbers or CVV values.
 
 ## Verified plan allowances
 
@@ -41,7 +53,7 @@ Core FijiLaw Credits metering and persistent wallet storage are implemented and 
 | Law Firm Premium | 7,500 monthly |
 | Institutional | 5,000 monthly default |
 
-The current allowance key for paid plans is calendar-month based. A future billing integration should align renewal grants to the authoritative subscription billing period rather than calendar month where necessary.
+The current allowance key for paid plans is calendar-month based. Future subscription billing should align allowance renewal to the authoritative billing period.
 
 ## Metered services currently live
 
@@ -52,46 +64,70 @@ The current allowance key for paid plans is calendar-month based. A future billi
 
 Planned services remain in the catalogue but are not charged until their workflows are implemented.
 
-## API endpoints
+## Payment API endpoints
 - `GET /api/credits/catalog`
 - `GET /api/credits/wallet`
 - `GET /api/credits/history`
 - `POST /api/credits/checkout`
+- `GET|POST /api/credits/payment/notify?orderId=...`
+- `GET /api/credits/payment/status/{orderId}`
 - `POST /api/admin/credits/grant`
 - `POST /api/legal/triage` — authenticated + metered
 - `POST /api/legal/documents/analyse` — authenticated + metered
 
+## Windcave runtime configuration
+The implementation expects these backend-only environment variables:
+
+- `WINDCAVE_API_USERNAME`
+- `WINDCAVE_API_KEY`
+- `WINDCAVE_API_BASE` — optional; defaults to the Windcave production REST API base
+- `PUBLIC_WEB_URL`
+- `PUBLIC_API_URL`
+
+These values must never be exposed through browser environment variables or committed to source.
+
+## Payment completion rules
+1. User selects a FijiLaw Credit package.
+2. FijiLaw creates a persistent pending payment order.
+3. Backend creates a Windcave Hosted Payment Page session.
+4. Customer is redirected to Windcave for card entry/payment.
+5. FijiLaw receives a notification or the customer returns to the credits page.
+6. FijiLaw queries the Windcave session directly from the backend.
+7. Credits are granted only when the provider session reports an authorised transaction.
+8. The payment order and purchased-credit transaction are committed idempotently so repeat callbacks cannot double-credit the wallet.
+
 ## Production database
-The production Railway API uses Neon PostgreSQL for membership, authentication, subscriptions, credit wallets and transactions. Database credentials are stored only as runtime configuration and must never be committed to source or exposed in browser code.
+The production Railway API uses Neon PostgreSQL for membership, authentication, subscriptions, credit wallets, credit transactions and payment orders. Database credentials are runtime-only.
 
 ## Remaining external integrations
 
-### Real-money payment checkout — NOT complete
-Persistent production checkout intentionally refuses to grant purchased credits until a payment provider is connected. Required work:
-- [ ] Connect approved payment provider
-- [ ] Create server-side checkout sessions
-- [ ] Verify webhook signatures
-- [ ] Make payment events idempotent
-- [ ] Grant credits only after confirmed payment
-- [ ] Store provider transaction references
-- [ ] Handle refunds/chargebacks and credit adjustments
-- [ ] Commercial review of credit expiry/refund terms
+### Windcave merchant credentials — REQUIRED FOR LIVE PURCHASES
+The code is ready, but live checkout remains disabled until a Westpac Fiji/Windcave merchant account provides REST API credentials.
 
-Demo simulated top-ups are non-financial and must remain clearly labelled.
+Remaining operational steps:
+- [ ] Obtain/approve Fiji e-commerce merchant facility
+- [ ] Obtain Windcave REST API username and API key
+- [ ] Configure credentials in Railway
+- [ ] Run payment-provider test transactions
+- [ ] Validate approved/declined/cancelled paths
+- [ ] Define refund/chargeback credit policy
+- [ ] Commercial/legal review of credit expiry and refund terms
 
 ### Production OpenAI API provider — setup required
-The application supports an OpenAI-backed language model provider when `OPENAI_API_KEY` is configured on the backend. The current Railway configuration must be checked before representing OpenAI inference as enabled. The OpenAI key must remain server-side only and must never be sent to Vercel client code or exposed to users.
+The application supports OpenAI when `OPENAI_API_KEY` is configured on the Railway backend. The key must remain server-side only and must never be exposed to Vercel browser code or users.
 
-FijiLaw Credits remain FijiLaw usage units regardless of the underlying AI provider and must not be marketed as OpenAI API tokens.
+FijiLaw Credits remain FijiLaw usage units regardless of the underlying model/provider and must not be marketed as OpenAI API tokens.
 
 ## Security invariants
 1. Browser code cannot grant or deduct credits.
 2. API resolves authenticated member identity before wallet access.
 3. Credit balance changes are recorded in a transaction ledger.
-4. Metered workflows reserve before execution and refund on failure.
-5. Paid credit purchases require authoritative server-side payment confirmation.
-6. OpenAI/provider API credentials remain server-side.
-7. Sponsored commercial placement remains separate from legal reasoning and neutral legal recommendations.
+4. Metered workflows reserve credits before execution and refund on failure.
+5. Paid credit purchases require authoritative server-side provider verification.
+6. Duplicate provider callbacks cannot grant the same purchase twice.
+7. Payment card data is handled by the hosted payment provider rather than FijiLaw servers.
+8. OpenAI and payment-provider credentials remain server-side.
+9. Sponsored commercial placement remains separate from legal reasoning and neutral legal recommendations.
 
 ## Release readiness
-Core credit metering is suitable for controlled testing with persistent accounts. Real customer payment collection is not considered production-complete until payment-provider checkout and webhook verification are implemented and commercially reviewed.
+The wallet and payment workflow are technically ready for controlled testing. Real customer card collection becomes production-ready only after merchant credentials are configured, provider test transactions are completed, and the commercial/refund terms are reviewed.
