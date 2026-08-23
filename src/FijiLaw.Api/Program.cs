@@ -73,6 +73,8 @@ builder.Services.AddRateLimiter(options =>
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.AddPolicy("auth", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     options.AddPolicy("verification", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(10), QueueLimit = 0, AutoReplenishment = true }));
+    options.AddPolicy("payment", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+    options.AddPolicy("payment-notify", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
 });
 
 var app = builder.Build();
@@ -110,6 +112,7 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider, ResendEmailSender e
     creditWallet = !string.IsNullOrWhiteSpace(databaseUrl) ? "postgresql" : demoAuth.IsEnabled ? "demo-memory" : "unavailable",
     creditMetering = "enabled",
     creditPayments = payments.IsConfigured ? "windcave-ready" : "awaiting-windcave-merchant-credentials",
+    paymentVerification = "server-side-exact-order-match",
     demoAccountsSeeded = !string.IsNullOrWhiteSpace(databaseUrl) && seedDemoAccounts,
     emailDelivery = emailSender.IsConfigured ? "configured" : "awaiting-resend-config",
     aiProvider = modelProvider.Name,
