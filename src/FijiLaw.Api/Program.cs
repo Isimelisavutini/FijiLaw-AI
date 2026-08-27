@@ -49,6 +49,7 @@ else
     builder.Services.AddSingleton(_ => new PostgresCreditWalletStore(databaseUrl));
     builder.Services.AddSingleton<ICreditWalletStore>(sp => sp.GetRequiredService<PostgresCreditWalletStore>());
     builder.Services.AddSingleton(_ => new PostgresCreditPaymentStore(databaseUrl));
+    builder.Services.AddSingleton(_ => new PostgresVisitorAnalyticsStore(databaseUrl));
     builder.Services.AddSingleton(sp => new PostgresDemoAccountSeeder(databaseUrl, sp.GetRequiredService<PostgresMembershipAuthStore>()));
 }
 
@@ -76,6 +77,7 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("verification", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 5, Window = TimeSpan.FromMinutes(10), QueueLimit = 0, AutoReplenishment = true }));
     options.AddPolicy("payment", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     options.AddPolicy("payment-notify", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+    options.AddPolicy("analytics", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 180, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
 });
 
 var app = builder.Build();
@@ -98,6 +100,7 @@ if (!string.IsNullOrWhiteSpace(databaseUrl))
     await scope.ServiceProvider.GetRequiredService<PostgresMembershipSecurityStore>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresCreditWalletStore>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresCreditPaymentStore>().EnsureCreatedAsync();
+    await scope.ServiceProvider.GetRequiredService<PostgresVisitorAnalyticsStore>().EnsureCreatedAsync();
     if (seedDemoAccounts) await scope.ServiceProvider.GetRequiredService<PostgresDemoAccountSeeder>().EnsureSeededAsync();
 }
 
@@ -115,6 +118,7 @@ app.MapGet("/health", (ILanguageModelProvider modelProvider, ResendEmailSender e
     creditMetering = "enabled",
     creditPayments = payments.IsConfigured ? "windcave-ready" : "awaiting-windcave-merchant-credentials",
     paymentVerification = "server-side-exact-order-match",
+    visitorAnalytics = !string.IsNullOrWhiteSpace(databaseUrl) ? "enabled-privacy-conscious" : "unavailable",
     demoAccountsSeeded = !string.IsNullOrWhiteSpace(databaseUrl) && seedDemoAccounts,
     emailDelivery = emailSender.IsConfigured ? "configured" : "awaiting-resend-config",
     aiProvider = modelProvider.Name,
@@ -147,6 +151,7 @@ app.MapGet("/api/membership/plans", async (HttpContext context, CancellationToke
 
 app.MapMembershipEndpoints(databaseUrl, authBridgeSecret);
 app.MapCreditEndpoints(databaseUrl);
+app.MapVisitorAnalyticsEndpoints(databaseUrl);
 app.MapGet("/api/legal-services", (string? city, string? type, string? area, string? q, LegalServicesDirectory directory) => Results.Ok(new { items = directory.Search(city, type, area, q), cities = directory.Cities() }));
 
 app.MapPost("/api/admin/legal-sources", async (HttpRequest httpRequest, LegalSourceInput input, CancellationToken ct) =>
