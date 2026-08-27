@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { API_BASE, fetchWithTimeout, readApiError } from '../../../lib/api';
-import './visitor-report.css';
 
 type AnalyticsSummary={
   days:number;
