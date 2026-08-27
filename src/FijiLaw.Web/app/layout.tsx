@@ -5,6 +5,7 @@ import './membership.css';
 import ApiResilience from './ApiResilience';
 import MembershipEntryBar from './MembershipEntryBar';
 import AnalyticsTracker from './AnalyticsTracker';
+import AdminVisitorReportLauncher from './AdminVisitorReportLauncher';
 
 export const metadata = {
   title: 'FijiLaw AI',
@@ -17,7 +18,7 @@ export const viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const app = <ApiResilience><AnalyticsTracker /><MembershipEntryBar />{children}</ApiResilience>;
+  const app = <ApiResilience><AnalyticsTracker /><MembershipEntryBar /><AdminVisitorReportLauncher />{children}</ApiResilience>;
   const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
   return <html lang="en"><body>{clerkEnabled ? <ClerkProvider>{app}</ClerkProvider> : app}</body></html>;
