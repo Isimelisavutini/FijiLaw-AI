@@ -84,11 +84,13 @@ public sealed class PostgresVisitorAnalyticsStore
         const string totalsSql = """
         SELECT
           COUNT(*) AS page_views,
-          COUNT(DISTINCT visitor_hash) AS unique_visitors,
-          COUNT(DISTINCT user_id) FILTER (WHERE user_id IS NOT NULL) AS signed_in_users,
-          COUNT(DISTINCT visitor_hash) FILTER (WHERE user_id IS NULL) AS guest_visitors
-        FROM page_visit_events
-        WHERE occurred_at >= NOW() - (@days * INTERVAL '1 day');
+          COUNT(DISTINCT e.visitor_hash) AS unique_visitors,
+          COUNT(DISTINCT e.user_id) FILTER (WHERE e.user_id IS NOT NULL) AS signed_in_users,
+          COUNT(DISTINCT e.visitor_hash) FILTER (WHERE e.user_id IS NULL) AS guest_visitors,
+          COUNT(DISTINCT e.visitor_hash) FILTER (WHERE p.first_seen_at >= NOW() - (@days * INTERVAL '1 day')) AS new_visitors
+        FROM page_visit_events e
+        JOIN visitor_profiles p ON p.visitor_hash=e.visitor_hash
+        WHERE e.occurred_at >= NOW() - (@days * INTERVAL '1 day');
         """;
         await using (var command = new NpgsqlCommand(totalsSql, connection))
         {
@@ -100,22 +102,24 @@ public sealed class PostgresVisitorAnalyticsStore
                 totals["uniqueVisitors"] = reader.GetInt64(1);
                 totals["signedInUsers"] = reader.GetInt64(2);
                 totals["guestVisitors"] = reader.GetInt64(3);
+                totals["newVisitors"] = reader.GetInt64(4);
+                totals["returningVisitors"] = Math.Max(0, totals["uniqueVisitors"] - totals["newVisitors"]);
             }
         }
 
         var daily = new List<object>();
         const string dailySql = """
-        SELECT DATE(occurred_at) AS day, COUNT(*) AS views, COUNT(DISTINCT visitor_hash) AS visitors
+        SELECT TO_CHAR(DATE(occurred_at), 'YYYY-MM-DD') AS day, COUNT(*) AS views, COUNT(DISTINCT visitor_hash) AS visitors
         FROM page_visit_events
         WHERE occurred_at >= NOW() - (@days * INTERVAL '1 day')
         GROUP BY DATE(occurred_at)
-        ORDER BY day;
+        ORDER BY DATE(occurred_at);
         """;
         await using (var command = new NpgsqlCommand(dailySql, connection))
         {
             command.Parameters.AddWithValue("days", days);
             await using var reader = await command.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct)) daily.Add(new { date = reader.GetDateTime(0).ToString("yyyy-MM-dd"), views = reader.GetInt64(1), visitors = reader.GetInt64(2) });
+            while (await reader.ReadAsync(ct)) daily.Add(new { date = reader.GetString(0), views = reader.GetInt64(1), visitors = reader.GetInt64(2) });
         }
 
         var topPages = new List<object>();
