@@ -30,6 +30,8 @@ public sealed class PostgresMembershipSecurityStore(string connectionString)
 
             CREATE INDEX IF NOT EXISTS idx_email_verification_user ON email_verification_tokens(user_id, expires_at DESC);
             CREATE INDEX IF NOT EXISTS idx_membership_audit_user ON membership_audit_events(user_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_membership_audit_created ON membership_audit_events(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_membership_audit_type_created ON membership_audit_events(event_type, created_at DESC);
             """;
 
         await using var connection = new NpgsqlConnection(connectionString);
