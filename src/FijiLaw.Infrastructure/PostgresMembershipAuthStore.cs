@@ -79,7 +79,7 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
 
         const string userSql = """
             INSERT INTO app_users (id,email,display_name,requested_plan_code,email_verified,status)
-            VALUES (@id,@email,@displayName,@requestedPlan,FALSE,'active');
+            VALUES (@id,@email,@displayName,@requestedPlan,FALSE,'pending');
             """;
         await using (var cmd = new NpgsqlCommand(userSql, connection, transaction))
         {
@@ -152,7 +152,7 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
         const string identitySql = """
             SELECT id,email,display_name,phone_number
             FROM app_users
-            WHERE identity_provider=@provider AND identity_subject=@subject AND status='active'
+            WHERE identity_provider=@provider AND identity_subject=@subject AND status<>'suspended'
             LIMIT 1
             FOR UPDATE;
             """;
@@ -172,7 +172,7 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
 
         if (userId is null && email is not null && request.EmailVerified)
         {
-            const string emailSql = "SELECT id,email,display_name,phone_number FROM app_users WHERE email=@email AND status='active' LIMIT 1 FOR UPDATE;";
+            const string emailSql = "SELECT id,email,display_name,phone_number FROM app_users WHERE email=@email AND status<>'suspended' LIMIT 1 FOR UPDATE;";
             await using var byEmail = new NpgsqlCommand(emailSql, connection, transaction);
             byEmail.Parameters.AddWithValue("email", email);
             await using var reader = await byEmail.ExecuteReaderAsync(ct);
@@ -187,7 +187,7 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
 
         if (userId is null && phone is not null && request.PhoneVerified)
         {
-            const string phoneSql = "SELECT id,email,display_name,phone_number FROM app_users WHERE phone_number=@phone AND status='active' LIMIT 1 FOR UPDATE;";
+            const string phoneSql = "SELECT id,email,display_name,phone_number FROM app_users WHERE phone_number=@phone AND status<>'suspended' LIMIT 1 FOR UPDATE;";
             await using var byPhone = new NpgsqlCommand(phoneSql, connection, transaction);
             byPhone.Parameters.AddWithValue("phone", phone);
             await using var reader = await byPhone.ExecuteReaderAsync(ct);
@@ -211,7 +211,7 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
                 INSERT INTO app_users
                   (id,email,display_name,identity_provider,identity_subject,phone_number,requested_plan_code,email_verified,phone_verified,identity_verified_at,status)
                 VALUES
-                  (@id,@email,@displayName,@provider,@subject,@phone,@requestedPlan,@emailVerified,@phoneVerified,NOW(),'active');
+                  (@id,@email,@displayName,@provider,@subject,@phone,@requestedPlan,@emailVerified,@phoneVerified,NOW(),'pending');
                 """;
             await using var create = new NpgsqlCommand(createSql, connection, transaction);
             create.Parameters.AddWithValue("id", userId.Value);
