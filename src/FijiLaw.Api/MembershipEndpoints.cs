@@ -203,19 +203,6 @@ public static class MembershipEndpoints
             return Results.Ok(MembershipAuthorization.HasPermission(member, permission));
         });
 
-        app.MapPost("/api/admin/membership/users/{targetUserId:guid}/roles/{roleCode}", async (
-            Guid targetUserId, string roleCode, HttpRequest request, HttpContext context, CancellationToken ct) =>
-        {
-            var actor = await ResolveMemberAsync(request, context, databaseUrl, ct);
-            if (actor is null) return Results.Unauthorized();
-            if (!actor.Roles.Contains(MembershipRoles.PlatformAdmin, StringComparer.OrdinalIgnoreCase)) return Results.Forbid();
-            if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Demo roles are fixed and cannot be modified.", statusCode: 503);
-
-            var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
-            var assigned = await security.AssignRoleAsync(targetUserId, roleCode, actor.UserId, $"Platform administrator assigned role '{roleCode}'.", ct);
-            return assigned ? Results.Ok(new { assigned = true, targetUserId, roleCode }) : Results.BadRequest(new { error = "Role could not be assigned or was already present." });
-        });
-
         return app;
     }
 
