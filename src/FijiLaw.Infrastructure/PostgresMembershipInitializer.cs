@@ -20,7 +20,7 @@ public sealed class PostgresMembershipInitializer(string connectionString)
               email_verified BOOLEAN NOT NULL DEFAULT FALSE,
               phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
               identity_verified_at TIMESTAMPTZ,
-              status TEXT NOT NULL DEFAULT 'active',
+              status TEXT NOT NULL DEFAULT 'pending',
               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
               updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
               UNIQUE (identity_provider, identity_subject)
@@ -31,6 +31,7 @@ public sealed class PostgresMembershipInitializer(string connectionString)
             ALTER TABLE app_users ADD COLUMN IF NOT EXISTS phone_number TEXT;
             ALTER TABLE app_users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE;
             ALTER TABLE app_users ADD COLUMN IF NOT EXISTS identity_verified_at TIMESTAMPTZ;
+            ALTER TABLE app_users ALTER COLUMN status SET DEFAULT 'pending';
             CREATE UNIQUE INDEX IF NOT EXISTS ux_app_users_external_identity
               ON app_users(identity_provider, identity_subject)
               WHERE identity_provider IS NOT NULL AND identity_subject IS NOT NULL;

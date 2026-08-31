@@ -45,7 +45,7 @@ public sealed class PostgresMembershipSecurityStore(string connectionString)
         await connection.OpenAsync(ct);
         await using var transaction = await connection.BeginTransactionAsync(ct);
 
-        const string findSql = "SELECT id,email,email_verified FROM app_users WHERE email=@email AND status='active' LIMIT 1;";
+        const string findSql = "SELECT id,email,email_verified FROM app_users WHERE email=@email AND status IN ('pending','active') LIMIT 1;";
         await using var find = new NpgsqlCommand(findSql, connection, transaction);
         find.Parameters.AddWithValue("email", normalized);
         await using var reader = await find.ExecuteReaderAsync(ct);

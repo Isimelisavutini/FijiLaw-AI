@@ -24,7 +24,7 @@ public static class MembershipEndpoints
                 var store = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
                 var result = await store.RegisterAsync(request, ct);
                 var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
-                await security.RecordAuditAsync(result.UserId, result.UserId, "member_registered", $"Member account created; requested plan '{request.RequestedPlanCode ?? MembershipPlans.Free}'.", ct);
+                await security.RecordAuditAsync(result.UserId, result.UserId, "member_registered", $"Member account created pending System Administrator approval; requested plan '{request.RequestedPlanCode ?? MembershipPlans.Free}'.", ct);
                 return Results.Ok(result);
             }
             catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
@@ -132,22 +132,32 @@ public static class MembershipEndpoints
 
         app.MapPost("/api/auth/request-email-verification", async (HttpRequest request, HttpContext context, CancellationToken ct) =>
         {
-            var member = await ResolveMemberAsync(request, context, databaseUrl, ct);
-            if (member is null) return Results.Unauthorized();
-            if (member.IdentityVerified) return Results.Ok(new { message = "Identity is already verified.", deliveryConfigured = true, deliveryAccepted = true, alreadyVerified = true });
+            VerificationIdentity? identity;
+            if (string.IsNullOrWhiteSpace(databaseUrl))
+            {
+                var demoMember = await ResolveMemberAsync(request, context, databaseUrl, ct);
+                if (demoMember is null) return Results.Unauthorized();
+                identity = new VerificationIdentity(demoMember.UserId, demoMember.Email, demoMember.IdentityVerified);
+            }
+            else
+            {
+                identity = await ResolveVerificationIdentityAsync(request, context, databaseUrl, ct);
+                if (identity is null) return Results.Unauthorized();
+            }
+            if (identity.IdentityVerified) return Results.Ok(new { message = "Identity is already verified.", deliveryConfigured = true, deliveryAccepted = true, alreadyVerified = true });
             if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Email verification is not required for controlled demo accounts.", statusCode: 503);
 
             var security = context.RequestServices.GetRequiredService<PostgresMembershipSecurityStore>();
             var emailSender = context.RequestServices.GetRequiredService<ResendEmailSender>();
-            var created = await security.CreateVerificationTokenAsync(member.Email, ct);
+            var created = await security.CreateVerificationTokenAsync(identity.Email, ct);
             var delivered = false;
             if (created is not null)
             {
-                await security.RecordAuditAsync(created.Value.UserId, member.UserId, "email_verification_requested", "Verification token issued", ct);
+                await security.RecordAuditAsync(created.Value.UserId, identity.UserId, "email_verification_requested", "Verification token issued", ct);
                 if (emailSender.IsConfigured)
                 {
                     delivered = await emailSender.SendVerificationAsync(created.Value.Email, created.Value.Token, ct);
-                    await security.RecordAuditAsync(created.Value.UserId, member.UserId, delivered ? "email_verification_sent" : "email_verification_send_failed", delivered ? "Verification email accepted by provider" : "Verification email provider returned a failure", ct);
+                    await security.RecordAuditAsync(created.Value.UserId, identity.UserId, delivered ? "email_verification_sent" : "email_verification_send_failed", delivered ? "Verification email accepted by provider" : "Verification email provider returned a failure", ct);
                 }
             }
 
@@ -208,6 +218,30 @@ public static class MembershipEndpoints
 
         return app;
     }
+
+    private static async Task<VerificationIdentity?> ResolveVerificationIdentityAsync(
+        HttpRequest request, HttpContext context, string databaseUrl, CancellationToken ct)
+    {
+        var token = GetBearerToken(request);
+        var auth = context.RequestServices.GetRequiredService<PostgresMembershipAuthStore>();
+        var userId = await auth.ValidateSessionAsync(token, ct);
+        if (userId is null) return null;
+
+        await using var connection = new Npgsql.NpgsqlConnection(databaseUrl);
+        await connection.OpenAsync(ct);
+        const string sql = """
+            SELECT email,(email_verified OR phone_verified OR identity_verified_at IS NOT NULL)
+            FROM app_users WHERE id=@id AND status IN ('pending','active');
+            """;
+        await using var command = new Npgsql.NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("id", userId.Value);
+        await using var reader = await command.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct)
+            ? new VerificationIdentity(userId.Value, reader.GetString(0), reader.GetBoolean(1))
+            : null;
+    }
+
+    private sealed record VerificationIdentity(Guid UserId, string Email, bool IdentityVerified);
 
     private static async Task<AuthenticatedMember?> ResolveMemberAsync(HttpRequest request, HttpContext context, string? databaseUrl, CancellationToken ct)
     {
