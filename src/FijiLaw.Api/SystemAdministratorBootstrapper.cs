@@ -40,7 +40,8 @@ public static class SystemAdministratorBootstrapper
         await using (var completed = new NpgsqlCommand("SELECT user_id FROM membership_audit_events WHERE event_type=@event LIMIT 1 FOR UPDATE;", connection, transaction))
         {
             completed.Parameters.AddWithValue("event", CompletedEvent);
-            completedUserId = await completed.ExecuteScalarAsync(ct) as Guid?;
+            var completedValue = await completed.ExecuteScalarAsync(ct);
+            completedUserId = completedValue is Guid completedId ? completedId : null;
         }
         if (completedUserId is not null)
         {
