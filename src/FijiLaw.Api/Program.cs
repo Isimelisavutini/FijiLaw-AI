@@ -155,6 +155,7 @@ app.MapMembershipEndpoints(databaseUrl, authBridgeSecret);
 app.MapCreditEndpoints(databaseUrl);
 app.MapVisitorAnalyticsEndpoints(databaseUrl);
 app.MapAdminUsersEndpoints(databaseUrl);
+app.MapAdminSecurityEndpoints(databaseUrl);
 app.MapGet("/api/legal-services", (string? city, string? type, string? area, string? q, LegalServicesDirectory directory) => Results.Ok(new { items = directory.Search(city, type, area, q), cities = directory.Cities() }));
 
 app.MapPost("/api/admin/legal-sources", async (HttpRequest httpRequest, LegalSourceInput input, CancellationToken ct) =>
