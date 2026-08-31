@@ -47,7 +47,7 @@ export default function AdminSecurityPanel(){
 
  return <div className={styles.stack} style={{gap:16}}>
   <section className={styles.hero} style={{marginBottom:0}}>
-   <div><p className={styles.eyebrow} style={{color:'#F4D28A'}}>SECURITY OPERATIONS</p><h2>Platform security and audit trail</h2><p>Review account posture, active sessions and immutable administrative events. Authentication secrets, credentials and session tokens are never returned to this dashboard.</p></div>
+   <div><p className={styles.eyebrow} style={{color:'#F4D28A'}}>SECURITY OPERATIONS</p><h2>Platform security and audit trail</h2><p>Review account posture, active sessions and recorded administrative events. Authentication secrets, credentials and session tokens are never returned to this dashboard.</p></div>
    <span className={styles.heroTag}>{data?.posture.activeAdministrators??'—'} active administrator{data?.posture.activeAdministrators===1?'':'s'}</span>
   </section>
 
@@ -73,7 +73,7 @@ export default function AdminSecurityPanel(){
   </div>
 
   <section className={styles.card}>
-   <div style={sectionHeading}><div><p className={styles.eyebrow}>IMMUTABLE EVENT LOG</p><h3 style={{fontSize:20,marginTop:5}}>Security and membership audit</h3><p>Showing recorded account and administrator actions. Use Users to change access or revoke sessions.</p></div><span style={recordCount}>{data?.audit.total?.toLocaleString()??'—'} matching records</span></div>
+   <div style={sectionHeading}><div><p className={styles.eyebrow}>AUDIT EVENT LOG</p><h3 style={{fontSize:20,marginTop:5}}>Security and membership audit</h3><p>Showing recorded account and administrator actions. Use Users to change access or revoke sessions.</p></div><span style={recordCount}>{data?.audit.total?.toLocaleString()??'—'} matching records</span></div>
    <form onSubmit={search} style={filterRow}>
     <label style={srOnly} htmlFor="audit-search">Search audit history</label>
     <input id="audit-search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search user, actor, event or reason" style={searchInput}/>
