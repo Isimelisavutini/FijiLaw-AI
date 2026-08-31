@@ -172,7 +172,7 @@ public static class AdminUsersEndpoints
             }
 
             var revokedSessions = 0;
-            if (desiredStatus == "suspended")
+            if (desiredStatus == "suspended" || (target.Status == "pending" && desiredStatus == "active"))
                 revokedSessions = await RevokeSessionsAsync(connection, transaction, targetUserId, ct);
 
             var eventType = desiredStatus == "active" && target.Status == "pending"
