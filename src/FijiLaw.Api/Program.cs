@@ -22,6 +22,7 @@ var windcaveApiBase = builder.Configuration["WINDCAVE_API_BASE"];
 var demoAuthEnabled = string.Equals(builder.Configuration["DEMO_AUTH_ENABLED"], "true", StringComparison.OrdinalIgnoreCase);
 var seedDemoAccounts = string.Equals(builder.Configuration["SEED_DEMO_ACCOUNTS"], "true", StringComparison.OrdinalIgnoreCase);
 var demoPassword = demoAuthEnabled ? (builder.Configuration["DEMO_AUTH_PASSWORD"] ?? "FijiLawDemo2026!") : null;
+var systemAdministratorBootstrap = SystemAdministratorBootstrapOptions.FromConfiguration(builder.Configuration);
 var configuredOrigins = new[]
 {
     builder.Configuration["WebOrigin"],
@@ -102,6 +103,7 @@ if (!string.IsNullOrWhiteSpace(databaseUrl))
     await scope.ServiceProvider.GetRequiredService<PostgresCreditPaymentStore>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresVisitorAnalyticsStore>().EnsureCreatedAsync();
     if (seedDemoAccounts) await scope.ServiceProvider.GetRequiredService<PostgresDemoAccountSeeder>().EnsureSeededAsync();
+    await SystemAdministratorBootstrapper.RunAsync(databaseUrl, systemAdministratorBootstrap, seedDemoAccounts);
 }
 
 app.MapGet("/health", (ILanguageModelProvider modelProvider, ResendEmailSender emailSender, DemoMembershipAuthStore demoAuth, WindcavePaymentGateway payments) => Results.Ok(new
