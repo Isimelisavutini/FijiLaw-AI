@@ -471,7 +471,12 @@ public sealed class PostgresMembershipAuthStore(string connectionString)
         cmd.Parameters.AddWithValue("hash", HashToken(rawToken));
         cmd.Parameters.AddWithValue("expiresAt", expiresAt);
         await cmd.ExecuteNonQueryAsync(ct);
-        return new AuthSessionResult(rawToken, expiresAt, userId, email, displayName, phoneNumber, identityVerified);
+        const string statusSql = "SELECT status FROM app_users WHERE id=@userId;";
+        await using var statusCommand = new NpgsqlCommand(statusSql, connection, transaction);
+        statusCommand.Parameters.AddWithValue("userId", userId);
+        var accountStatus = (string?)await statusCommand.ExecuteScalarAsync(ct);
+        return new AuthSessionResult(rawToken, expiresAt, userId, email, displayName, phoneNumber, identityVerified,
+            !string.Equals(accountStatus, "active", StringComparison.OrdinalIgnoreCase));
     }
 
     private static string NormalizeEmail(string email)

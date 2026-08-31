@@ -226,14 +226,30 @@ public static class VisitorAnalyticsEndpoints
             if (string.IsNullOrWhiteSpace(databaseUrl)) return Results.Problem("Analytics storage is unavailable.", statusCode: 503);
             var userId = await ResolveUserIdAsync(request, context, databaseUrl, ct);
             if (userId is null) return Results.Unauthorized();
-            var repo = context.RequestServices.GetRequiredService<PostgresMembershipRepository>();
-            var access = await repo.GetAccessAsync(userId.Value, ct);
-            if (access is null || !access.Roles.Contains("platform_admin", StringComparer.OrdinalIgnoreCase)) return Results.Forbid();
+            if (!await IsActiveVerifiedAdministratorAsync(databaseUrl, userId.Value, ct)) return Results.Forbid();
             var store = context.RequestServices.GetRequiredService<PostgresVisitorAnalyticsStore>();
             return Results.Ok(await store.GetSummaryAsync(days ?? 30, ct));
         });
 
         return app;
+    }
+
+    private static async Task<bool> IsActiveVerifiedAdministratorAsync(string databaseUrl, Guid userId, CancellationToken ct)
+    {
+        await using var connection = new NpgsqlConnection(databaseUrl);
+        await connection.OpenAsync(ct);
+        const string sql = """
+            SELECT EXISTS(
+                SELECT 1 FROM app_users u
+                JOIN user_roles ur ON ur.user_id=u.id
+                JOIN roles r ON r.id=ur.role_id
+                WHERE u.id=@userId AND u.status='active' AND r.code='platform_admin'
+                  AND (u.email_verified OR u.phone_verified OR u.identity_verified_at IS NOT NULL)
+            );
+            """;
+        await using var command = new NpgsqlCommand(sql, connection);
+        command.Parameters.AddWithValue("userId", userId);
+        return await command.ExecuteScalarAsync(ct) is true;
     }
 
     private static async Task<Guid?> ResolveUserIdAsync(HttpRequest request, HttpContext context, string databaseUrl, CancellationToken ct)

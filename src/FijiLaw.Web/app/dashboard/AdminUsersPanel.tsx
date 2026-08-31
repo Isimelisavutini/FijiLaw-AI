@@ -14,11 +14,11 @@ type AuditEvent={id:string;eventType:string;reason?:string|null;createdAt:string
 type UsersResponse={items:User[];roles:Role[];page:number;pageSize:number;total:number};
 
 export default function AdminUsersPanel(){
- const[users,setUsers]=useState<User[]>([]);const[roles,setRoles]=useState<Role[]>([]);const[query,setQuery]=useState('');
+ const[users,setUsers]=useState<User[]>([]);const[roles,setRoles]=useState<Role[]>([]);const[query,setQuery]=useState('');const[page,setPage]=useState(1);const[total,setTotal]=useState(0);
  const[loading,setLoading]=useState(true);const[error,setError]=useState('');const[notice,setNotice]=useState('');
  const[busyId,setBusyId]=useState('');const[editingId,setEditingId]=useState('');const[roleDraft,setRoleDraft]=useState<string[]>([]);
  const[auditUser,setAuditUser]=useState<User|null>(null);const[audit,setAudit]=useState<AuditEvent[]>([]);const[auditLoading,setAuditLoading]=useState(false);
- useEffect(()=>{void loadUsers('')},[]);
+ useEffect(()=>{void loadUsers('',1)},[]);
 
  function token(){return sessionStorage.getItem('fijilaw_access_token')??''}
  async function adminFetch(path:string,init:RequestInit={}){
@@ -28,12 +28,12 @@ export default function AdminUsersPanel(){
   if(!response.ok)throw new Error(await readApiError(response,'The administrator request could not be completed.'));
   return response;
  }
- async function loadUsers(search=query){
+ async function loadUsers(search=query,pageNumber=page){
   setLoading(true);setError('');
-  try{const response=await adminFetch(`/api/admin/users?pageSize=100&q=${encodeURIComponent(search)}`);const body:UsersResponse=await response.json();setUsers(body.items);setRoles(body.roles)}
+  try{const response=await adminFetch(`/api/admin/users?page=${pageNumber}&pageSize=50&q=${encodeURIComponent(search)}`);const body:UsersResponse=await response.json();setUsers(body.items);setRoles(body.roles);setPage(body.page);setTotal(body.total)}
   catch(e){setError(e instanceof Error?e.message:'Users could not be loaded.')}finally{setLoading(false)}
  }
- async function search(e:FormEvent){e.preventDefault();await loadUsers(query)}
+ async function search(e:FormEvent){e.preventDefault();await loadUsers(query,1)}
  async function changeStatus(user:User,status:'active'|'suspended'){
   const action=status==='active'?(user.status==='pending'?'approve':'reactivate'):'suspend';
   if(!window.confirm(`Are you sure you want to ${action} ${user.email}?${status==='suspended'?' All active sessions will be revoked.':''}`))return;
@@ -63,8 +63,8 @@ export default function AdminUsersPanel(){
  const pending=users.filter(user=>user.status==='pending').length;
  return <div className={styles.stack} style={{gap:16}}>
   <section className={styles.card}>
-   <div style={headerRow}><div><p className={styles.eyebrow}>SYSTEM ADMINISTRATOR CONTROL PLANE</p><h3 style={{fontSize:22,marginTop:6}}>Accounts and access</h3><p>New registrations remain pending until you approve them. Approval requires a verified identity.</p></div><div style={summaryBox}><strong>{pending}</strong><span>awaiting approval</span></div></div>
-   <form onSubmit={search} style={searchRow}><label htmlFor="user-search" style={srOnly}>Search users</label><input id="user-search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search by name or email" style={searchInput}/><button className={styles.secondary} disabled={loading}>{loading?'Loading…':'Search'}</button><button type="button" className={styles.secondary} onClick={()=>{setQuery('');void loadUsers('')}}>Clear</button></form>
+   <div style={headerRow}><div><p className={styles.eyebrow}>SYSTEM ADMINISTRATOR CONTROL PLANE</p><h3 style={{fontSize:22,marginTop:6}}>Accounts and access</h3><p>New registrations remain pending until you approve them. Approval requires a verified identity.</p></div><div style={summaryBox}><strong>{pending}</strong><span>awaiting approval on this page</span></div></div>
+   <form onSubmit={search} style={searchRow}><label htmlFor="user-search" style={srOnly}>Search users</label><input id="user-search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Search by name or email" style={searchInput}/><button className={styles.secondary} disabled={loading}>{loading?'Loading…':'Search'}</button><button type="button" className={styles.secondary} onClick={()=>{setQuery('');void loadUsers('',1)}}>Clear</button></form>
    {error&&<p role="alert" style={errorBox}>{error}</p>}{notice&&<p role="status" style={noticeBox}>{notice}</p>}
   </section>
 
@@ -75,6 +75,7 @@ export default function AdminUsersPanel(){
     </table>
    </div>
    {!loading&&users.length===0&&<div className={styles.empty}>No accounts match this search.</div>}
+   {total>0&&<div style={{...headerRow,alignItems:'center',marginTop:16}}><span style={{color:'#667684',fontSize:12}}>Showing {((page-1)*50)+1}–{Math.min(page*50,total)} of {total} accounts</span><div style={actions}><button className={styles.secondary} disabled={loading||page<=1} onClick={()=>void loadUsers(query,page-1)}>Previous</button><span style={{padding:'9px 6px',fontSize:12,fontWeight:800}}>Page {page} of {Math.max(1,Math.ceil(total/50))}</span><button className={styles.secondary} disabled={loading||page*50>=total} onClick={()=>void loadUsers(query,page+1)}>Next</button></div></div>}
   </section>
 
   {editingId&&(()=>{const user=users.find(item=>item.id===editingId);return user?<section className={styles.card}><div style={headerRow}><div><p className={styles.eyebrow}>ROLE ASSIGNMENT</p><h3 style={{marginTop:6}}>{user.email}</h3><p>Role changes are enforced by the API and recorded in the audit history.</p></div><button className={styles.secondary} onClick={()=>setEditingId('')}>Close</button></div><div style={roleGrid}>{roles.map(role=><label key={role.code} style={roleOption}><input type="checkbox" checked={roleDraft.includes(role.code)} onChange={()=>toggleRole(role.code)}/><span><strong>{role.name}</strong><small style={subText}>{role.description||role.code}</small></span></label>)}</div><div style={actions}><button style={primarySmall} disabled={busyId===user.id} onClick={()=>void saveRoles(user)}>Save roles</button><button className={styles.secondary} onClick={()=>setEditingId('')}>Cancel</button></div></section>:null})()}

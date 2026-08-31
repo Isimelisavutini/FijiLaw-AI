@@ -29,7 +29,8 @@ public sealed record AuthSessionResult(
     string Email,
     string? DisplayName,
     string? PhoneNumber = null,
-    bool IdentityVerified = false);
+    bool IdentityVerified = false,
+    bool ApprovalRequired = false);
 
 public sealed record AuthenticatedMember(
     Guid UserId,
