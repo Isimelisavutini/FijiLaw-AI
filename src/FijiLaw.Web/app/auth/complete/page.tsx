@@ -5,11 +5,13 @@ import { useEffect, useState } from 'react';
 export default function CompleteVerifiedIdentityPage() {
   const [message,setMessage]=useState('Confirming your verified identity…');
   const [failed,setFailed]=useState(false);
+  const [pendingApproval,setPendingApproval]=useState(false);
 
   useEffect(()=>{ void complete(); },[]);
 
   async function complete(){
     setFailed(false);
+    setPendingApproval(false);
     setMessage('Confirming your verified identity…');
     try{
       const params=new URLSearchParams(window.location.search);
@@ -29,6 +31,12 @@ export default function CompleteVerifiedIdentityPage() {
       if(body.email && !String(body.email).endsWith('@identity.fijilaw.local')) sessionStorage.setItem('fijilaw_member_email',body.email);
       if(body.primaryIdentifier) sessionStorage.setItem('fijilaw_member_identifier',body.primaryIdentifier);
       if(requestedPlanCode) sessionStorage.setItem('fijilaw_selected_plan',requestedPlanCode);
+      if(body.approvalRequired){
+        sessionStorage.removeItem('fijilaw_access_token');
+        setPendingApproval(true);
+        setMessage('Your identity is verified and your FijiLaw account is awaiting System Administrator approval. You can sign in after approval.');
+        return;
+      }
       setMessage('Verified. Opening your FijiLaw account…');
       window.location.replace('/dashboard');
     }catch(error){
@@ -51,6 +59,7 @@ export default function CompleteVerifiedIdentityPage() {
       <strong>{failed?'Account link needs attention.':'Verification in progress.'}</strong>
       <p style={{margin:'8px 0 0',lineHeight:1.65,color:'#566674'}}>{message}</p>
       {failed?<div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:16}}><button type="button" onClick={()=>void complete()} style={button}>Try again</button><a href="/account?mode=register" style={link}>Return to registration</a></div>:null}
+      {pendingApproval?<div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:16}}><a href="/account?mode=login" style={link}>Return to sign in</a><a href="/" style={link}>Public legal help</a></div>:null}
     </section>
   </main>;
 }
