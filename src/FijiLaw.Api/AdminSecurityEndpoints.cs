@@ -13,11 +13,12 @@ public static class AdminSecurityEndpoints
             if (authorization is not null) return authorization;
 
             var days = ParseBoundedInt(request.Query["days"], 30, 1, 90);
-            var page = ParseBoundedInt(request.Query["page"], 1, 1, int.MaxValue);
+            var page = ParseBoundedInt(request.Query["page"], 1, 1, 10_000);
             var pageSize = ParseBoundedInt(request.Query["pageSize"], 50, 1, 100);
             var eventType = request.Query["eventType"].ToString().Trim().ToLowerInvariant();
             var query = request.Query["q"].ToString().Trim();
-            var offset = (page - 1) * pageSize;
+            if (query.Length > 80) return Results.BadRequest(new { error = "Audit search is limited to 80 characters." });
+            var offset = ((long)page - 1) * pageSize;
 
             await using var connection = new NpgsqlConnection(databaseUrl!);
             await connection.OpenAsync(ct);
@@ -108,12 +109,12 @@ public static class AdminSecurityEndpoints
                 WHERE events.created_at>=NOW()-(@days * INTERVAL '1 day')
                   AND (@eventType='' OR events.event_type=@eventType)
                   AND (
-                    @query='' OR events.event_type ILIKE '%' || @query || '%'
-                    OR COALESCE(events.reason,'') ILIKE '%' || @query || '%'
-                    OR COALESCE(target.email,'') ILIKE '%' || @query || '%'
-                    OR COALESCE(target.display_name,'') ILIKE '%' || @query || '%'
-                    OR COALESCE(actor.email,'') ILIKE '%' || @query || '%'
-                    OR COALESCE(actor.display_name,'') ILIKE '%' || @query || '%'
+                    @query='' OR events.event_type ILIKE @query || '%'
+                    OR to_tsvector('simple',COALESCE(events.reason,'')) @@ plainto_tsquery('simple',@query)
+                    OR COALESCE(target.email,'') ILIKE @query || '%'
+                    OR COALESCE(target.display_name,'') ILIKE @query || '%'
+                    OR COALESCE(actor.email,'') ILIKE @query || '%'
+                    OR COALESCE(actor.display_name,'') ILIKE @query || '%'
                   )
                 """;
             long total;
@@ -160,7 +161,7 @@ public static class AdminSecurityEndpoints
                 eventTypes,
                 audit = new { items = events, page, pageSize, total }
             });
-        });
+        }).RequireRateLimiting("admin-read");
 
         return app;
     }
