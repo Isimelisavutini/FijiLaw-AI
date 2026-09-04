@@ -54,7 +54,7 @@ else
     builder.Services.AddSingleton(_ => new PostgresCreditWalletStore(databaseUrl));
     builder.Services.AddSingleton<ICreditWalletStore>(sp => sp.GetRequiredService<PostgresCreditWalletStore>());
     builder.Services.AddSingleton(_ => new PostgresCreditPaymentStore(databaseUrl));
-    builder.Services.AddSingleton(_ => new PostgresVisitorAnalyticsStore(databaseUrl));
+    builder.Services.AddSingleton(_ => new PostgresVisitorAnalyticsStore(databaseUrl));\n    builder.Services.AddSingleton(_ => new PostgresLegalChatStore(databaseUrl));
     builder.Services.AddSingleton(sp => new PostgresDemoAccountSeeder(databaseUrl, sp.GetRequiredService<PostgresMembershipAuthStore>()));
 }
 
@@ -96,7 +96,7 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("payment-notify", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     options.AddPolicy("analytics", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 180, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
     options.AddPolicy("admin-read", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
-    options.AddPolicy("admin-write", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
+    options.AddPolicy("admin-write", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));\n    options.AddPolicy("chat", httpContext => RateLimitPartition.GetFixedWindowLimiter(httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown", _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0, AutoReplenishment = true }));
 });
 
 var app = builder.Build();
@@ -119,7 +119,7 @@ if (!string.IsNullOrWhiteSpace(databaseUrl))
     await scope.ServiceProvider.GetRequiredService<PostgresMembershipSecurityStore>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresCreditWalletStore>().EnsureCreatedAsync();
     await scope.ServiceProvider.GetRequiredService<PostgresCreditPaymentStore>().EnsureCreatedAsync();
-    await scope.ServiceProvider.GetRequiredService<PostgresVisitorAnalyticsStore>().EnsureCreatedAsync();
+    await scope.ServiceProvider.GetRequiredService<PostgresVisitorAnalyticsStore>().EnsureCreatedAsync();\n    await scope.ServiceProvider.GetRequiredService<PostgresLegalChatStore>().EnsureCreatedAsync();
     if (seedDemoAccounts) await scope.ServiceProvider.GetRequiredService<PostgresDemoAccountSeeder>().EnsureSeededAsync();
     await SystemAdministratorBootstrapper.RunAsync(databaseUrl, systemAdministratorBootstrap, seedDemoAccounts);
 }
@@ -170,7 +170,7 @@ app.MapGet("/api/membership/plans", async (HttpContext context, CancellationToke
 });
 
 app.MapMembershipEndpoints(databaseUrl, authBridgeSecret);
-app.MapCreditEndpoints(databaseUrl);
+app.MapCreditEndpoints(databaseUrl);\napp.MapLegalChatEndpoints(databaseUrl);
 app.MapVisitorAnalyticsEndpoints(databaseUrl);
 app.MapAdminUsersEndpoints(databaseUrl);
 app.MapAdminSecurityEndpoints(databaseUrl);
