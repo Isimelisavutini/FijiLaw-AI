@@ -14,7 +14,7 @@ public static class AdminMembershipEndpoints
             var authorization = await AuthorizeAsync(request, context, databaseUrl, ct);
             if (authorization.Error is not null) return authorization.Error;
 
-            var page = ParseBoundedInt(request.Query["page"], 1, 1, 10_000);
+            var page = ParseBoundedInt(request.Query["page"], 1, 1, 200);
             var pageSize = ParseBoundedInt(request.Query["pageSize"], 50, 1, 100);
             var query = request.Query["q"].ToString().Trim();
             var status = request.Query["status"].ToString().Trim().ToLowerInvariant();
@@ -26,26 +26,36 @@ public static class AdminMembershipEndpoints
             await connection.OpenAsync(ct);
 
             const string summarySql = """
+                WITH active_subscriptions AS (
+                  SELECT subscriptions.*,plans.is_paid,plans.monthly_price_fjd,plans.annual_price_fjd
+                  FROM subscriptions
+                  JOIN subscription_plans plans ON plans.id=subscriptions.plan_id
+                  WHERE subscriptions.status IN ('active','trialing')
+                    AND (subscriptions.current_period_end IS NULL OR subscriptions.current_period_end>NOW())
+                ),
+                effective_access AS (
+                  SELECT DISTINCT ON (user_id) *
+                  FROM active_subscriptions
+                  ORDER BY user_id,
+                    CASE WHEN billing_provider='administrator' THEN 0 ELSE 1 END,
+                    created_at DESC
+                ),
+                billable AS (
+                  SELECT DISTINCT ON (user_id) *
+                  FROM active_subscriptions
+                  WHERE billing_provider IS DISTINCT FROM 'administrator' AND is_paid
+                  ORDER BY user_id,created_at DESC
+                )
                 SELECT
-                  COUNT(*) FILTER (WHERE s.status IN ('active','trialing') AND (s.current_period_end IS NULL OR s.current_period_end>NOW())),
-                  COUNT(*) FILTER (WHERE s.status IN ('active','trialing') AND plans.is_paid
-                    AND (s.current_period_end IS NULL OR s.current_period_end>NOW())),
-                  COUNT(*) FILTER (WHERE s.status IN ('active','trialing') AND NOT plans.is_paid
-                    AND (s.current_period_end IS NULL OR s.current_period_end>NOW())),
-                  COUNT(*) FILTER (WHERE s.status IN ('active','trialing') AND s.billing_provider='administrator'
-                    AND (s.current_period_end IS NULL OR s.current_period_end>NOW())),
-                  COUNT(*) FILTER (WHERE s.status IN ('active','trialing') AND s.current_period_end BETWEEN NOW() AND NOW()+INTERVAL '30 days'),
-                  COALESCE(SUM(
-                    CASE
-                      WHEN s.status NOT IN ('active','trialing') OR s.billing_provider='administrator'
-                        OR (s.current_period_end IS NOT NULL AND s.current_period_end<=NOW()) THEN 0
-                      WHEN s.billing_interval='monthly' THEN COALESCE(plans.monthly_price_fjd,0)
-                      WHEN s.billing_interval='annual' THEN COALESCE(plans.annual_price_fjd,0)/12
-                      ELSE 0
-                    END
-                  ),0)
-                FROM subscriptions s
-                JOIN subscription_plans plans ON plans.id=s.plan_id;
+                  (SELECT COUNT(*) FROM effective_access),
+                  (SELECT COUNT(*) FROM effective_access WHERE is_paid),
+                  (SELECT COUNT(*) FROM effective_access WHERE NOT is_paid),
+                  (SELECT COUNT(*) FROM effective_access WHERE billing_provider='administrator'),
+                  (SELECT COUNT(*) FROM effective_access WHERE current_period_end BETWEEN NOW() AND NOW()+INTERVAL '30 days'),
+                  COALESCE((SELECT SUM(CASE
+                    WHEN billing_interval='monthly' THEN COALESCE(monthly_price_fjd,0)
+                    WHEN billing_interval='annual' THEN COALESCE(annual_price_fjd,0)/12
+                    ELSE 0 END) FROM billable),0);
                 """;
             AdminMembershipSummary summary;
             await using (var command = new NpgsqlCommand(summarySql, connection))
@@ -59,11 +69,11 @@ public static class AdminMembershipEndpoints
 
             const string plansSql = """
                 SELECT plans.code,plans.name,plans.audience,plans.monthly_price_fjd,plans.annual_price_fjd,plans.is_paid,
-                       COUNT(subscriptions.id) FILTER (
+                       COUNT(DISTINCT subscriptions.user_id) FILTER (
                          WHERE subscriptions.status IN ('active','trialing')
                            AND (subscriptions.current_period_end IS NULL OR subscriptions.current_period_end>NOW())
                        ) AS active_members,
-                       COUNT(subscriptions.id) FILTER (
+                       COUNT(DISTINCT subscriptions.user_id) FILTER (
                          WHERE subscriptions.status IN ('active','trialing')
                            AND subscriptions.billing_provider='administrator'
                            AND (subscriptions.current_period_end IS NULL OR subscriptions.current_period_end>NOW())
@@ -114,7 +124,8 @@ public static class AdminMembershipEndpoints
                     ORDER BY
                       CASE WHEN subscriptions.status IN ('active','trialing')
                                 AND (subscriptions.current_period_end IS NULL OR subscriptions.current_period_end>NOW())
-                           THEN 0 ELSE 1 END,
+                           THEN 0 ELSE 2 END,
+                      CASE WHEN subscriptions.billing_provider='administrator' THEN 0 ELSE 1 END,
                       subscriptions.created_at DESC
                     LIMIT 1
                 ) membership ON TRUE
@@ -211,7 +222,7 @@ public static class AdminMembershipEndpoints
 
             Guid? planId = null;
             string? planName = null;
-            const string planSql = "SELECT id,name FROM subscription_plans WHERE code=@planCode AND is_active=TRUE AND is_paid=TRUE;";
+            const string planSql = "SELECT id,name FROM subscription_plans WHERE code=@planCode AND is_active=TRUE AND is_paid=TRUE AND audience IN ('citizen','lawyer');";
             await using (var command = new NpgsqlCommand(planSql, connection, transaction))
             {
                 command.Parameters.AddWithValue("planCode", planCode);
@@ -222,7 +233,7 @@ public static class AdminMembershipEndpoints
                     planName = reader.GetString(1);
                 }
             }
-            if (planId is null) return Results.BadRequest(new { error = "Choose an active paid membership plan." });
+            if (planId is null) return Results.BadRequest(new { error = "Choose an active individual paid membership plan." });
 
             const string deactivateSql = """
                 UPDATE subscriptions

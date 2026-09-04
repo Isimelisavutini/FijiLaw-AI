@@ -45,7 +45,7 @@ public sealed class PostgresMembershipRepository(string connectionString)
                 WHERE s.user_id = @userId
                   AND s.status IN ('active','trialing')
                   AND (s.current_period_end IS NULL OR s.current_period_end > NOW())
-                ORDER BY s.created_at DESC
+                ORDER BY CASE WHEN s.billing_provider='administrator' THEN 0 ELSE 1 END, s.created_at DESC
                 LIMIT 1
             ),
             role_codes AS (
