@@ -53,7 +53,8 @@ export default function AdminMembershipsPanel(){
 }
 
 function SummaryCard({label,value,note}:{label:string;value?:number|string;note:string}){return <section className={styles.kpi}><span>{label}</span><strong>{value===undefined?'—':typeof value==='number'?value.toLocaleString():value}</strong><small style={sub}>{note}</small></section>}
-function isIndividualPaidPlan(plan:Plan){return plan.isPaid&&(plan.audience==='citizen'||plan.audience==='lawyer')}\nfunction nameFor(code:string,plans?:Plan[]){return plans?.find(plan=>plan.code===code)?.name??code.replaceAll('_',' ')}
+function isIndividualPaidPlan(plan:Plan){return plan.isPaid&&(plan.audience==='citizen'||plan.audience==='lawyer')}
+function nameFor(code:string,plans?:Plan[]){return plans?.find(plan=>plan.code===code)?.name??code.replaceAll('_',' ')}
 function sourceName(value?:string|null){return value==='administrator'?'Administrator grant':value||'Internal / free'}
 function sourceBadge(value?:string|null){return {display:'inline-block',borderRadius:999,padding:'5px 8px',fontSize:10,fontWeight:900,background:value==='administrator'?'#FFF5D9':value?'#EAF3F8':'#EDF2F5',color:value==='administrator'?'#785918':value?'#315A72':'#405463'}}
 function dateAfter(days:number){const date=new Date();date.setDate(date.getDate()+days);return date.toISOString().slice(0,10)}
