@@ -7,6 +7,9 @@ public static class MembershipAuthorization
         if (!member.IdentityVerified)
             return AuthorizationDecision.Deny("Verified identity is required.");
 
+        if (string.Equals(member.PlanCode, MembershipPlans.Free, StringComparison.OrdinalIgnoreCase))
+            return AuthorizationDecision.Allow();
+
         if (!member.Permissions.Contains(MembershipPermissions.DashboardAccess, StringComparer.OrdinalIgnoreCase))
             return AuthorizationDecision.Deny("Dashboard.Access entitlement is required.");
 
