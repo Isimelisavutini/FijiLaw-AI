@@ -41,6 +41,15 @@ public static class LegalChatEndpoints
             if (string.IsNullOrWhiteSpace(message)) return Results.BadRequest(new { error = "Message is required." });
             if (message.Length > 8000) return Results.BadRequest(new { error = "Message must not exceed 8,000 characters." });
 
+            var chatStore = context.RequestServices.GetRequiredService<PostgresLegalChatStore>();
+            IReadOnlyList<LegalChatMessage>? previousMessages = null;
+            if (body.ConversationId is not null)
+            {
+                previousMessages = await chatStore.GetMessagesAsync(member.UserId, body.ConversationId.Value, ct);
+                if (previousMessages is null) return Results.NotFound(new { error = "Conversation not found." });
+            }
+            var modelInput = BuildModelInput(message, previousMessages ?? Array.Empty<LegalChatMessage>());
+
             var credits = FijiLawCreditCatalog.PriceFor(FijiLawCreditCatalog.DashboardLegalChat);
             var correlationId = Guid.NewGuid().ToString("N");
             var walletStore = context.RequestServices.GetRequiredService<ICreditWalletStore>();
@@ -53,8 +62,7 @@ public static class LegalChatEndpoints
 
             try
             {
-                var triage = await agent.TriageAsync(new LegalTriageRequest(message, Language: "en"), ct);
-                var chatStore = context.RequestServices.GetRequiredService<PostgresLegalChatStore>();
+                var triage = await agent.TriageAsync(new LegalTriageRequest(modelInput, Language: "en"), ct);
                 var exchange = await chatStore.SaveExchangeAsync(member.UserId, body.ConversationId, CreateTitle(message), message, FormatAssistant(triage), modelProvider.Name, correlationId, ct);
                 if (exchange is null)
                 {
@@ -87,6 +95,14 @@ public static class LegalChatEndpoints
         }).RequireRateLimiting("chat");
 
         return app;
+    }
+
+    private static string BuildModelInput(string message, IReadOnlyList<LegalChatMessage> previousMessages)
+    {
+        if (previousMessages.Count == 0) return message;
+        var context = string.Join("\n\n", previousMessages.TakeLast(8).Select(x => $"{(x.Role == "user" ? "User" : "FijiLaw AI")}: {x.Content}"));
+        if (context.Length > 12000) context = context[^12000..];
+        return $"Use the prior conversation only as context. Reassess all legal claims against verified Fiji sources.\n\n{context}\n\nCurrent user question:\n{message}";
     }
 
     private static string CreateTitle(string message)
