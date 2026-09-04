@@ -19,7 +19,7 @@ public interface ICreditWalletStore
 public static class FijiLawCreditCatalog
 {
     public const string AdvancedTriage = "advanced_legal_triage";
-    public const string DocumentAnalysis = "document_analysis";
+    public const string DocumentAnalysis = "document_analysis";\n    public const string DashboardLegalChat = "dashboard_legal_chat";
 
     public static readonly IReadOnlyList<CreditPackage> Packages = new[]
     {
@@ -33,7 +33,7 @@ public static class FijiLawCreditCatalog
     public static readonly IReadOnlyList<AiCreditPrice> Services = new[]
     {
         new AiCreditPrice(AdvancedTriage, "Advanced Legal Triage Report", 10, true),
-        new AiCreditPrice(DocumentAnalysis, "Document analysis", 15, true),
+        new AiCreditPrice(DocumentAnalysis, "Document analysis", 15, true),\n        new AiCreditPrice(DashboardLegalChat, "Dashboard legal chat", 3, true),
         new AiCreditPrice("follow_up_analysis", "Follow-up analysis", 3, false),
         new AiCreditPrice("detailed_legal_research", "Detailed legal research", 20, false),
         new AiCreditPrice("compare_authorities", "Compare verified authorities", 15, false),
