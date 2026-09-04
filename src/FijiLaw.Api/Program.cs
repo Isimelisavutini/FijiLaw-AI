@@ -12,6 +12,10 @@ var adminApiKey = builder.Configuration["ADMIN_API_KEY"];
 var authBridgeSecret = builder.Configuration["AUTH_BRIDGE_SECRET"];
 var openAiApiKey = builder.Configuration["OPENAI_API_KEY"];
 var openAiModel = builder.Configuration["OPENAI_MODEL"] ?? "gpt-5.6-luna";
+var configuredAiProvider = builder.Configuration["AI_PROVIDER"]?.Trim().ToLowerInvariant();
+var qwenApiKey = builder.Configuration["QWEN_API_KEY"] ?? builder.Configuration["DASHSCOPE_API_KEY"];
+var qwenBaseUrl = builder.Configuration["QWEN_BASE_URL"];
+var qwenModel = builder.Configuration["QWEN_MODEL"] ?? "qwen-plus";
 var resendApiKey = builder.Configuration["RESEND_API_KEY"];
 var emailFrom = builder.Configuration["EMAIL_FROM"];
 var publicWebUrl = builder.Configuration["PUBLIC_WEB_URL"];
@@ -64,8 +68,20 @@ builder.Services.AddSingleton(_ => new WindcavePaymentGateway(
     publicApiUrl,
     publicWebUrl));
 
-if (string.IsNullOrWhiteSpace(openAiApiKey)) builder.Services.AddSingleton<ILanguageModelProvider, DisabledLanguageModelProvider>();
-else builder.Services.AddSingleton<ILanguageModelProvider>(_ => new OpenAIResponsesProvider(new HttpClient { Timeout = TimeSpan.FromSeconds(45) }, openAiApiKey, openAiModel));
+var qwenConfigured = !string.IsNullOrWhiteSpace(qwenApiKey) && !string.IsNullOrWhiteSpace(qwenBaseUrl);
+var useQwen = configuredAiProvider == "qwen" ||
+    (string.IsNullOrWhiteSpace(configuredAiProvider) && string.IsNullOrWhiteSpace(openAiApiKey) && qwenConfigured);
+var useOpenAi = configuredAiProvider == "openai" ||
+    (string.IsNullOrWhiteSpace(configuredAiProvider) && !string.IsNullOrWhiteSpace(openAiApiKey));
+
+if (useQwen && qwenConfigured)
+    builder.Services.AddSingleton<ILanguageModelProvider>(_ => new QwenChatCompletionsProvider(
+        new HttpClient { Timeout = TimeSpan.FromSeconds(45) }, qwenApiKey, qwenBaseUrl, qwenModel));
+else if (useOpenAi && !string.IsNullOrWhiteSpace(openAiApiKey))
+    builder.Services.AddSingleton<ILanguageModelProvider>(_ => new OpenAIResponsesProvider(
+        new HttpClient { Timeout = TimeSpan.FromSeconds(45) }, openAiApiKey, openAiModel));
+else
+    builder.Services.AddSingleton<ILanguageModelProvider, DisabledLanguageModelProvider>();
 
 builder.Services.AddSingleton<ILegalAgent, LegalAgent>();
 builder.Services.AddSingleton<DocumentTextExtractor>();
