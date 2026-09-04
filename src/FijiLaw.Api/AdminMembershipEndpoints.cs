@@ -113,14 +113,14 @@ public static class AdminMembershipEndpoints
             }
 
             const string membershipFromSql = """
-                FROM app_users users
+                FROM app_users member_user
                 LEFT JOIN LATERAL (
                     SELECT subscriptions.id,plans.code AS plan_code,plans.name AS plan_name,plans.is_paid,
                            subscriptions.status,subscriptions.billing_provider,subscriptions.billing_interval,
                            subscriptions.current_period_end,subscriptions.created_at
                     FROM subscriptions
                     JOIN subscription_plans plans ON plans.id=subscriptions.plan_id
-                    WHERE subscriptions.user_id=users.id
+                    WHERE subscriptions.user_id=member_user.id
                     ORDER BY
                       CASE WHEN subscriptions.status IN ('active','trialing')
                                 AND (subscriptions.current_period_end IS NULL OR subscriptions.current_period_end>NOW())
@@ -129,7 +129,7 @@ public static class AdminMembershipEndpoints
                       subscriptions.created_at DESC
                     LIMIT 1
                 ) membership ON TRUE
-                WHERE (@query='' OR users.email ILIKE @query || '%' OR COALESCE(users.display_name,'') ILIKE @query || '%')
+                WHERE (@query='' OR member_user.email ILIKE @query || '%' OR COALESCE(member_user.display_name,'') ILIKE @query || '%')
                   AND (@status='' OR COALESCE(membership.status,'none')=@status)
                   AND (@planCode='' OR COALESCE(membership.plan_code,'free')=@planCode)
                 """;
@@ -142,13 +142,13 @@ public static class AdminMembershipEndpoints
 
             var memberships = new List<AdminMembershipAccount>();
             var listSql = """
-                SELECT users.id,users.email,users.display_name,users.status,
-                       (users.email_verified OR users.phone_verified OR users.identity_verified_at IS NOT NULL) AS identity_verified,
-                       COALESCE(users.requested_plan_code,'free'),
+                SELECT member_user.id,member_user.email,member_user.display_name,member_user.status,
+                       (member_user.email_verified OR member_user.phone_verified OR member_user.identity_verified_at IS NOT NULL) AS identity_verified,
+                       COALESCE(member_user.requested_plan_code,'free'),
                        membership.id,membership.plan_code,membership.plan_name,membership.is_paid,
                        membership.status,membership.billing_provider,membership.billing_interval,
                        membership.current_period_end,membership.created_at
-                """ + membershipFromSql + " ORDER BY users.created_at DESC LIMIT @pageSize OFFSET @offset;";
+                """ + membershipFromSql + " ORDER BY member_user.created_at DESC LIMIT @pageSize OFFSET @offset;";
             await using (var command = new NpgsqlCommand(listSql, connection))
             {
                 AddListParameters(command, query, status, planCode);
@@ -323,11 +323,11 @@ public static class AdminMembershipEndpoints
         await connection.OpenAsync(ct);
         const string sql = """
             SELECT EXISTS(
-                SELECT 1 FROM app_users users
-                JOIN user_roles user_roles ON user_roles.user_id=users.id
+                SELECT 1 FROM app_users member_user
+                JOIN user_roles user_roles ON user_roles.user_id=member_user.id
                 JOIN roles roles ON roles.id=user_roles.role_id
-                WHERE users.id=@userId AND users.status='active' AND roles.code='platform_admin'
-                  AND (users.email_verified OR users.phone_verified OR users.identity_verified_at IS NOT NULL)
+                WHERE member_user.id=@userId AND member_user.status='active' AND roles.code='platform_admin'
+                  AND (member_user.email_verified OR member_user.phone_verified OR member_user.identity_verified_at IS NOT NULL)
             );
             """;
         await using var command = new NpgsqlCommand(sql, connection);
