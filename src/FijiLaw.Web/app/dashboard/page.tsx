@@ -6,7 +6,8 @@ import styles from './dashboard.module.css';
 import VisitorAnalyticsReportButton from './VisitorAnalyticsReportButton';
 import AdminUsersPanel from './AdminUsersPanel';
 import AdminSecurityPanel from './AdminSecurityPanel';
-import AdminMembershipsPanel from './AdminMembershipsPanel';\nimport LegalChatPanel from './LegalChatPanel';
+import AdminMembershipsPanel from './AdminMembershipsPanel';
+import LegalChatPanel from './LegalChatPanel';
 
 type Dashboard={userId:string;email:string;displayName?:string;planCode:string;subscriptionStatus:string;roles:string[];permissions:string[];dashboardAccess:boolean};
 type Member={userId:string;email:string;displayName?:string;emailVerified:boolean;planCode:string;subscriptionStatus:string;roles:string[];permissions:string[]};
