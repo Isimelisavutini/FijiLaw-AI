@@ -42,6 +42,15 @@ database/
 tests/
 ```
 
+## AI provider configuration
+
+FijiLaw keeps model credentials on the API server and meters end-user usage through its own credit wallet.
+
+- OpenAI: set `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and optionally `OPENAI_MODEL`.
+- Qwen Model Studio: set `AI_PROVIDER=qwen`, `QWEN_API_KEY` (or `DASHSCOPE_API_KEY`), `QWEN_BASE_URL`, and optionally `QWEN_MODEL` (defaults to `qwen-plus`).
+- For Singapore Model Studio, `QWEN_BASE_URL` must be the workspace-specific HTTPS base URL ending in `/compatible-mode/v1`.
+- Never expose provider API keys to the browser or allocate a shared provider credential directly to a member.
+
 ## Safety principles
 
 1. Prefer authoritative Fiji legal sources.
